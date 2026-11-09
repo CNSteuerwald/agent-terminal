@@ -101,7 +101,7 @@ function openExternal(url) {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url);
 }
 
-const payload = () => ({ ...current, home: os.homedir() });
+const payload = () => ({ ...current, home: os.homedir(), version: app.getVersion() });
 
 function broadcastSettings() {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('settings:changed', payload());

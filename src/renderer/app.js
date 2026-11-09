@@ -11,6 +11,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 let S = null;            // effective settings from main
 let HOME = '';
+let VERSION = '';
 let keymap = new Map();  // normalized combo -> action id
 const tabs = [];
 let active = null;
@@ -484,16 +485,21 @@ async function createTab(o) {
     tab.root ||= initialLayout(tab, o);
   }
   tab.focused = tabPanes(tab).find(p => p.isAgent) || tabPanes(tab)[0];
-  const fresh = tabPanes(tab).filter(p => !p.term);
-  tab.view.classList.add('active'); // xterm must measure its cell size while visible
   renderLayout(tab);
-  fresh.forEach(p => p.open());
-  const starting = fresh.map(p => p.start()); // start() fits synchronously before awaiting
-  if (o.activate === false) { tab.view.classList.remove('active'); renderTabs(); } else activate(tab);
-  await Promise.all(starting);
-  renderTabs();
+  // Background tabs (e.g. restored on launch) start their terminals when first activated.
+  if (o.activate === false) renderTabs();
+  else { activate(tab); await tab.starting; }
   refreshInfo([tab]);
   return tab;
+}
+
+// Opens and starts panes that have no terminal yet. The tab's view must be visible: xterm measures its cell size.
+function startPanes(tab) {
+  const fresh = tabPanes(tab).filter(p => !p.term);
+  if (!fresh.length) return tab.starting;
+  fresh.forEach(p => p.open());
+  tab.starting = Promise.all(fresh.map(p => p.start())).then(renderTabs); // start() fits synchronously before awaiting
+  return tab.starting;
 }
 
 function newTab({ cwd, profile, agent = S.defaultAgent } = {}) {
@@ -607,6 +613,7 @@ function activate(tab) {
   tab.attention = false;
   tab.done = false;
   for (const t of tabs) t.view.classList.toggle('active', t === tab);
+  startPanes(tab);
   const first = primaryPane(tab);
   if (first) document.documentElement.style.setProperty('--term-bg', scheme(first.schemeName()).background);
   renderTabs();
@@ -1424,6 +1431,7 @@ const SECTIONS = {
       'Reopens your tabs, folders and split layout. Claude Code, Copilot and OpenCode resume their last conversation (--continue).'),
     field('Setup wizard', Object.assign(el('button', { textContent: 'Run setup again', type: 'button', className: 'secondary' }),
       { onclick: e => { e.preventDefault(); closeSettings(); runWizard(); } })),
+    field('Version', el('span', { textContent: VERSION })),
   ],
   Tabs: () => [
     field('Tab layout', select(S.tabLayout, [['vertical', 'Vertical (sidebar)'], ['horizontal', 'Horizontal (top)']], v => set('tabLayout', v))),
@@ -1625,6 +1633,7 @@ function syncSbxTab() {
 function apply(payload) {
   S = payload.settings;
   HOME = payload.home;
+  VERSION = payload.version;
   if (payload.error) toast(payload.error);
   buildKeymap();
   applyTheme();
