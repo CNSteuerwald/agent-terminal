@@ -52,7 +52,21 @@ jobs:
         shell: bash
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
-      - name: Build and publish
+      # Create the release up front as a draft: electron-builder uploads its files in parallel, and
+      # when no release exists yet each upload creates its own (duplicate releases, stray .blockmap).
+      - name: Create draft release
+        shell: bash
+        run: gh release create "v$(node -p "require('./package.json').version")" --draft --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and upload the installer
         run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the release
+        shell: bash
+        run: gh release edit "v$(node -p "require('./package.json').version")" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
