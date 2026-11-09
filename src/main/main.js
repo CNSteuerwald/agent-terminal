@@ -28,6 +28,7 @@ const ptys = new Map(); // id -> { proc, wc }
 const tabCounts = new WeakMap(); // BrowserWindow -> open tab count
 let nextPtyId = 1;
 let sbxOwner = null; // webContents whose sbx tab receives "open in external terminal" requests
+let quittingOnPurpose = false; // installing an update or uninstalling: skip the "close N tabs?" prompt
 
 const sbxPath = () => sandbox.which(current.settings.sandboxCommand || 'sbx');
 
@@ -68,7 +69,7 @@ function createWindow(dir, session) {
   let confirmed = false;
   win.on('close', e => {
     const n = tabCounts.get(win) || 0;
-    if (!confirmed && current.settings.confirmOnClose && n >= 2) {
+    if (!confirmed && !quittingOnPurpose && current.settings.confirmOnClose && n >= 2) {
       // The async dialog is the only one that reports the checkbox, so hold the close and redo it on "Close all".
       e.preventDefault();
       dialog.showMessageBox(win, {
@@ -101,7 +102,38 @@ function openExternal(url) {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url);
 }
 
-const payload = () => ({ ...current, home: os.homedir(), version: app.getVersion() });
+const payload = () => ({ ...current, home: os.homedir(), version: app.getVersion(), packaged: app.isPackaged });
+
+// Settings → General → Uninstall. Runs the installer's own uninstaller (removes the app, shortcuts and
+// the Apps & features entry) after we quit, and optionally deletes our data folders too.
+const UNINSTALLER = path.join(path.dirname(process.execPath), 'Uninstall Agent Terminal.exe');
+ipcMain.handle('app:uninstall', async e => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!app.isPackaged || process.platform !== 'win32' || !fs.existsSync(UNINSTALLER)) {
+    await dialog.showMessageBox(win, { type: 'info', message: 'Uninstall is only available in a copy installed with Agent-Terminal-Setup.exe.' });
+    return false;
+  }
+  const { response, checkboxChecked } = await dialog.showMessageBox(win, {
+    type: 'warning', buttons: ['Uninstall', 'Cancel'], defaultId: 1, cancelId: 1,
+    message: 'Uninstall Agent Terminal?',
+    detail: 'This closes the app, stops all of its shells and agents, and removes it from this PC. Your projects, agent CLIs and Docker sandboxes are not touched.',
+    checkboxLabel: 'Also delete my settings, saved tabs and downloaded updates', checkboxChecked: true,
+  });
+  if (response !== 0) return false;
+  // Only ever delete our own folders, even if userData was pointed elsewhere with --user-data-dir.
+  const dataDirs = checkboxChecked
+    ? [app.getPath('userData'), path.join(process.env.LOCALAPPDATA || '', 'agent-terminal-updater')]
+      .filter(d => ['agent-terminal', 'agent-terminal-updater'].includes(path.basename(d)) && fs.existsSync(d))
+    : [];
+  // Wait for this process to exit, then uninstall silently (the per-user form Windows registers), then clean up.
+  const script = ['timeout /t 2 /nobreak >nul', `"${UNINSTALLER}" /currentuser /S`, ...dataDirs.map(d => `rmdir /s /q "${d}"`)].join(' & ');
+  require('child_process').spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${script}"`], {
+    detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true,
+  }).unref();
+  quittingOnPurpose = true;
+  app.quit();
+  return true;
+});
 
 function broadcastSettings() {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('settings:changed', payload());
@@ -212,6 +244,6 @@ app.whenReady().then(() => {
   const saved = current.settings.restoreSession ? readSessions() : [];
   if (!saved.length) createWindow(startupDir());
   saved.forEach((s, i) => createWindow(i === 0 ? startupDir() : null, s));
-  updater.start();
+  updater.start({ beforeInstall: () => { quittingOnPurpose = true; } });
 });
 app.on('window-all-closed', () => app.quit());

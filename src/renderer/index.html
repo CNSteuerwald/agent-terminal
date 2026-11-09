@@ -12,16 +12,18 @@
   <div id="app" class="vertical">
     <nav id="tabbar" aria-label="Tabs">
       <div id="tabs" role="tablist"></div>
-      <div id="tabbar-actions">
-        <button id="new-agent-tab" class="new-btn">+ Agent</button>
-        <button id="new-shell-tab" class="new-btn" title="New tab with only a terminal (Ctrl+Alt+T). Open the agent later from the pane header.">+ Terminal</button>
-        <button id="new-tab-menu" title="New tab with…" aria-label="New tab with profile or agent">▾</button>
-        <span class="spacer"></span>
-        <button id="settings-btn" title="Settings (Ctrl+,)" aria-label="Settings">⚙</button>
-      </div>
     </nav>
     <div id="sidebar-resizer" role="separator" aria-label="Resize sidebar"></div>
     <main id="views"></main>
+    <!-- Full-width bottom bar, outside the sidebar so it spans the window in both layouts. -->
+    <div id="tabbar-actions" role="toolbar" aria-label="New tab and settings">
+      <button id="new-agent-tab" class="new-btn">+ Agent</button>
+      <button id="new-shell-tab" class="new-btn" title="New tab with only a terminal (Ctrl+Alt+T). Open the agent later from the pane header.">+ Terminal</button>
+      <button id="new-tab-menu" title="New tab with…" aria-label="New tab with profile or agent">▾</button>
+      <span class="spacer"></span>
+      <span id="update-status" role="status" hidden></span>
+      <button id="settings-btn" title="Settings (Ctrl+,)" aria-label="Settings">⚙</button>
+    </div>
   </div>
 
   <div id="menu" class="popup" role="menu" hidden></div>
