@@ -25,13 +25,27 @@ While the repo is private, update checks use your GitHub CLI login. Run `gh auth
 
 ## Releasing a new version (maintainers)
 
+**From GitHub (no local commands):**
+
+1. Open **[Actions → Release](https://github.com/CNSteuerwald/agent-terminal/actions/workflows/release.yml)** and click **Run workflow** (branch: `master`).
+2. Pick the bump:
+   - **patch:** fixes (0.1.0 → 0.1.1)
+   - **minor:** new features (0.1.0 → 0.2.0)
+   - **major:** breaking changes (1.0.0)
+   - **current:** release the version already in `package.json` without bumping it, for example the very first release
+3. Click **Run workflow**.
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) then runs the tests and bumps the version in `package.json` with a `Release vX.Y.Z` commit on `master` and a tag. It builds the Windows installer and publishes a GitHub Release with it. Installed copies pick it up automatically. Run `git pull` afterwards to get the version commit locally.
+
+**From the command line,** if you prefer:
+
 ```powershell
 git checkout master; git pull
 npm version patch      # or minor / major: bumps package.json, commits, tags vX.Y.Z
 git push --follow-tags
 ```
 
-Pushing the tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml). It runs the tests, builds the Windows installer, and publishes a GitHub Release with it. Installed copies pick it up automatically. The workflow fails if the tag doesn't match `package.json`'s version.
+Pushing the tag runs the same workflow, which fails if the tag doesn't match `package.json`'s version.
 
 To build an installer locally without publishing, run `npm run dist`. The output goes to `dist\Agent-Terminal-Setup-<version>.exe`.
 
