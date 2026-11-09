@@ -11,7 +11,35 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 
 ---
 
-## Run it locally
+## Install (for the team)
+
+1. Make sure you can see [CNSteuerwald/agent-terminal](https://github.com/CNSteuerwald/agent-terminal) (it's private; ask to be added as a collaborator).
+2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
+3. Windows may show **"Windows protected your PC"** because the installer isn't code-signed yet. Click **More info → Run anyway**.
+
+### Updating
+
+The app checks for new releases on launch and every 4 hours. It downloads them in the background, then offers **Restart now** (your tabs reopen) or installs the next time you quit.
+
+While the repo is private, update checks use your GitHub CLI login. Run `gh auth login` once with the account that can see the repo. Without it, updates are manual: download and run the newest installer from Releases, and your settings and tabs are kept.
+
+## Releasing a new version (maintainers)
+
+```powershell
+git checkout master; git pull
+npm version patch      # or minor / major: bumps package.json, commits, tags vX.Y.Z
+git push --follow-tags
+```
+
+Pushing the tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml). It runs the tests, builds the Windows installer, and publishes a GitHub Release with it. Installed copies pick it up automatically. The workflow fails if the tag doesn't match `package.json`'s version.
+
+To build an installer locally without publishing, run `npm run dist`. The output goes to `dist\Agent-Terminal-Setup-<version>.exe`.
+
+> **Going public later:** make the repo public, remove `"private": true` from `build.publish` in `package.json`, and delete the `gh auth token` shortcut in `src/main/updater.js`. Updates then work for everyone with no GitHub login.
+
+---
+
+## Run it from source (development)
 
 ### Prerequisites
 
@@ -241,6 +269,7 @@ src/
   main/main.js       Electron main process: windows, PTYs (node-pty), IPC, settings file watch
   main/settings.js   Defaults, shell detection, settings merge/patch, launch commands
   main/info.js       Git status and agent-model detection for the sidebar
+  main/updater.js    Auto-update from GitHub Releases (electron-updater)
   main/sandbox.js    Docker Sandboxes: sbx lookup, wt.exe stand-in build, named-pipe listener
   shim/wt.cs         The wt.exe stand-in used inside the sbx tab (Windows)
   preload.js         The small, explicit API the UI may call (context-isolated, sandboxed)
@@ -262,4 +291,4 @@ The UI is plain JavaScript with [xterm.js](https://xtermjs.org/), with no framew
 
 ## Not included (yet)
 
-Keeping processes alive across restarts (tabs reopen and agents resume, but processes restart), packaged installers, and the original's ACP chat, error auto-fix and session-management features. The agent's own CLI covers most of those.
+Keeping processes alive across restarts (tabs reopen and agents resume, but processes restart), code signing, macOS/Linux installers, and the original's ACP chat, error auto-fix and session-management features. The agent's own CLI covers most of those.

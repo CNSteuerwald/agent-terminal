@@ -7,6 +7,13 @@ const pty = require('node-pty');
 const settings = require('./settings');
 const sandbox = require('./sandbox');
 const { getInfo } = require('./info');
+const updater = require('./updater');
+
+// The installer's product name ("Agent Terminal") would otherwise move settings away from
+// %APPDATA%\agent-terminal, where `npm start` keeps them. --user-data-dir still wins (testing).
+if (app.isPackaged && !app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'agent-terminal'));
+}
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const DEFAULTS_FILE = path.join(app.getPath('userData'), 'defaults.json');
@@ -205,5 +212,6 @@ app.whenReady().then(() => {
   const saved = current.settings.restoreSession ? readSessions() : [];
   if (!saved.length) createWindow(startupDir());
   saved.forEach((s, i) => createWindow(i === 0 ? startupDir() : null, s));
+  updater.start();
 });
 app.on('window-all-closed', () => app.quit());

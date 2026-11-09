@@ -32,8 +32,8 @@ function parseWtLaunch(args) {
 // Compiles the wt.exe stand-in into dir. Resolves to the directory, or null when unavailable.
 function ensureShim(dir) {
   if (!IS_WIN) return Promise.resolve(null);
-  // shortcut: compiles from the source tree; a packaged (asar) build must ship wt.cs unpacked or a prebuilt wt.exe.
-  const src = path.join(__dirname, '..', 'shim', 'wt.cs');
+  // csc.exe can't read inside app.asar; packaged builds ship src/shim unpacked (build.asarUnpack in package.json).
+  const src = path.join(__dirname, '..', 'shim', 'wt.cs').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
   const exe = path.join(dir, 'wt.exe');
   try {
     if (fs.statSync(exe).mtimeMs >= fs.statSync(src).mtimeMs) return Promise.resolve(dir);
