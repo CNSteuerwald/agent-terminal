@@ -54,11 +54,16 @@
 
   <div id="toast" role="status" hidden></div>
 
+  <!-- Drag-and-drop preview for panes: where the pane will land, and the insert point in a tab strip. -->
+  <div id="snap-overlay" hidden><span></span></div>
+  <div id="snap-marker" hidden></div>
+
   <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
   <script src="keys.js"></script>
+  <script src="layout.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

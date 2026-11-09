@@ -75,15 +75,26 @@ npm test
 - **Right-click a tab** to color it, rename it or close it. Choose a swatch or a custom color. The focused tab gets a soft tint of its color, and other tabs show just a colored edge. Colors are saved with your tabs.
 - Switch between a **vertical** sidebar and **horizontal** tabs in **Settings → Tabs**, or with the *Toggle vertical / horizontal tabs* command. Drag the sidebar edge to resize it. `Ctrl+Shift+S` hides it.
 
-### The split
+### Panes: as many terminals and agents as you want
 
-- Each pane has a header with its name and a **×** that closes it (stopping its process), just like a tab. `Ctrl+Shift+W` closes the focused pane.
-- When one pane is closed, the remaining pane's header shows a **+** button (e.g. **+ Claude Code** or **+ PowerShell**) that opens it again. When both panes are closed, the tab closes.
-- `Ctrl+Shift+I` switches focus between the shell and the agent.
-- `Ctrl+Shift+.` hides or shows the agent pane. Unlike closing, the agent keeps running while hidden.
+Each tab in the sidebar holds a layout of **panes**: terminals and agents, any number of each. Panes sit in **groups**. A group has a tab strip along its top, and groups are split side by side or stacked, like editor groups in VS Code.
+
+- **Add a pane:** the **+** at the right end of a group's tab strip adds a terminal (any shell profile) or an agent (any CLI). The menu also chooses where new panes go: as a **Tab** in that group, **Split right**, or **Split down**. `Ctrl+Shift+E` adds a terminal, `Alt+Shift+=` / `Alt+Shift+-` split one off right / down, and `Ctrl+Shift+.` opens (or cycles through) agent panes.
+- **Close a pane** with the **×** next to its name, a middle-click on its tab, or `Ctrl+Shift+W`. Closing a tab's last pane closes the tab.
+- **Drag a pane's tab** to rearrange. A highlight shows exactly where it will land:
+  - onto the **edge** of a pane: splits that pane, and the pane goes on that side
+  - onto the **middle** of a pane: joins that group as a tab
+  - onto a **tab strip**: inserts it at that spot (also reorders tabs)
+  - onto **another tab in the sidebar**: moves it into that tab, still running
+  - onto **empty sidebar space**: opens it as its own tab
+  - `Esc` cancels a drag.
+- **Resize** by dragging the bar between panes, or with `Alt+Shift+Arrows`. **Move focus** between panes with `Alt+Arrows`. `Ctrl+Shift+I` jumps between your terminal and your agent.
+- **Right-click a pane's tab** to rename it, restart it, split it off, move it to a new tab or close it. Double-click renames.
+- Each agent's tab icon pulses while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
+- New tabs start as a terminal plus your default agent, arranged per **Settings → General → New tab layout** (agent right / left / below / above, or both as tabs in one group).
+- **Customize** in **Settings → Panes**: where new panes open, the snap preview and its animation, how much of a pane's edge counts as "split here" (vs. "stack as a tab"), and whether close buttons always show.
+- Layouts, including splits, sizes, stacked tabs and pane names, are saved and reopen with your tabs.
 - **Ctrl+scroll** over a terminal makes the text bigger or smaller (same as `Ctrl+=` / `Ctrl+-`, with `Ctrl+0` to reset).
-- Drag the divider, or use `Alt+Shift+Arrow`, to resize.
-- Agent pane position (right/left/bottom/top) is a setting. You can also change it per tab from the command palette (*Move agent pane: …*).
 - When a process exits, press **Enter** in its pane to restart it.
 - In the agent pane, `Shift+Enter` sends a newline (Meta+Enter) instead of submitting, which Claude Code and most agent TUIs understand.
 
@@ -126,14 +137,17 @@ All of these can be rebound in **Settings → Actions** (click the field and pre
 | `Ctrl+Shift+T` | New tab: agent + terminal |
 | `Ctrl+Alt+T` | New tab: terminal only |
 | `Ctrl+Shift+O` | Open folder in new tab |
-| `Ctrl+Shift+D` | Duplicate tab |
-| `Ctrl+Shift+W` | Close focused pane (the tab closes when no panes are left) |
+| `Ctrl+Shift+D` | Duplicate tab (same panes and layout) |
+| `Ctrl+Shift+W` | Close focused pane (the tab closes with its last pane) |
+| `Ctrl+Shift+E` | New terminal pane |
+| `Alt+Shift+=` / `Alt+Shift+-` | Split right / down with a new terminal |
+| `Alt+Arrows` | Focus the pane to the left / right / above / below |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+Alt+1`…`8`, `Ctrl+Alt+9` | Switch to tab N / last tab |
 | `Ctrl+Shift+S` | Toggle tab sidebar |
-| `Ctrl+Shift+.` | Toggle agent pane |
-| `Ctrl+Shift+I` | Switch focus between shell and agent |
-| `Alt+Shift+Arrows` | Move the split |
+| `Ctrl+Shift+.` | Open an agent pane, or cycle focus through agent panes |
+| `Ctrl+Shift+I` | Switch focus between terminal and agent |
+| `Alt+Shift+Arrows` | Move the split between panes |
 | `Ctrl+Shift+P` | Command palette (all actions, color schemes, switch agent, go to tab) |
 | `Ctrl+,` | Settings |
 | `Ctrl+Shift+,` | Open `settings.json` |
@@ -150,7 +164,7 @@ All of these can be rebound in **Settings → Actions** (click the field and pre
 | `Shift+Enter` (agent pane) | Newline instead of submit |
 | `Ctrl+Shift+F12` | Developer tools |
 
-Unbound by default (available in the palette): close tab, rename tab, move tab forward/backward, open shell pane, open agent pane, restart agent, restart shell, toggle split orientation, zoom pane, open the sbx tab, run setup wizard, open tab folder in file explorer, toggle always on top, toggle tab layout.
+Unbound by default (available in the palette): close tab, rename tab, move tab forward/backward, rename pane, restart pane, move pane to a new tab, toggle split orientation, zoom pane, open the sbx tab, run setup wizard, open tab folder in file explorer, toggle always on top, toggle tab layout.
 
 ---
 
@@ -177,7 +191,11 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "tabLayout": "vertical",                 // "vertical" | "horizontal"
   "sidebarWidth": 260,
   "tabMetadata": { "directory": true, "git": true, "model": true, "activity": true },
-  "agentPanePosition": "right",            // "right" | "left" | "bottom" | "top"
+  "agentPanePosition": "right",            // new tab layout: "right" | "left" | "bottom" | "top" | "tab"
+  "newPanePlacement": "tab",               // + button: "tab" | "right" | "down"
+  "snapPreview": true, "paneAnimations": true,
+  "snapEdge": 30,                          // % of a pane that counts as its edge when dropping
+  "paneCloseButton": "always",             // "always" | "hover"
   "agentPaneSize": 50,                     // percent
   "theme": "dark",                         // "dark" | "light" | "system"
   "colorScheme": "Campbell",
@@ -226,7 +244,8 @@ src/
   main/sandbox.js    Docker Sandboxes: sbx lookup, wt.exe stand-in build, named-pipe listener
   shim/wt.cs         The wt.exe stand-in used inside the sbx tab (Windows)
   preload.js         The small, explicit API the UI may call (context-isolated, sandboxed)
-  renderer/          UI: index.html, styles.css, app.js (tabs, panes, actions, settings, palette), keys.js
+  renderer/          UI: index.html, styles.css, app.js (tabs, panes, drag and drop, actions, settings, palette), keys.js
+  renderer/layout.js Pane layout tree (splits and groups): pure and unit-tested
   shared/schemes.json  Built-in color schemes
 test/                Node test runner tests for the pure logic
 ```
@@ -243,4 +262,4 @@ The UI is plain JavaScript with [xterm.js](https://xtermjs.org/), with no framew
 
 ## Not included (yet)
 
-Arbitrary pane splitting beyond shell+agent, keeping processes alive across restarts (tabs reopen and agents resume, but processes restart), packaged installers, and the original's ACP chat, error auto-fix and session-management features. The agent's own CLI covers most of those.
+Keeping processes alive across restarts (tabs reopen and agents resume, but processes restart), packaged installers, and the original's ACP chat, error auto-fix and session-management features. The agent's own CLI covers most of those.

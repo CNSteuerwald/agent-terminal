@@ -23,20 +23,28 @@ const panes = new Map();   // pty id -> Pane
 const pending = new Map(); // pty id -> events that arrived before spawn() resolved
 const seenPtys = new Set();
 
-// Tab types: 'workspace' (shell + agent CLI in one folder), 'sbx' (the Docker Sandboxes TUI, full window),
-// 'sandbox' (a sandbox session opened from the sbx TUI + a host shell in its workspace).
-// Each tab has two slots: tab.shell and tab.agent (the agent slot also holds sbx/sandbox panes).
-
 // ---------------------------------------------------------------- actions
 // [name, default keys, run]. run() returning false means "not handled": the key goes to the terminal.
 const ACTIONS = {
   newTab: ['New tab (agent + terminal)', 'ctrl+shift+t', () => newTab()],
   newShellTab: ['New terminal tab (no agent)', 'ctrl+alt+t', () => newTab({ agent: '' })],
   openFolder: ['Open folder in new tab…', 'ctrl+shift+o', openFolderTab],
-  duplicateTab: ['Duplicate tab', 'ctrl+shift+d', () => {
-    if (active?.type === 'workspace') newTab({ cwd: active.cwd, profile: active.profile, agent: active.agentId || '' });
+  duplicateTab: ['Duplicate tab (same panes and layout)', 'ctrl+shift+d', () => {
+    if (active?.type === 'workspace') createTab({ type: 'workspace', cwd: active.cwd, color: active.color, layout: Layout.serialize(active.root, paneJson) });
   }],
-  closePane: ['Close pane (closes the tab when no panes are left)', 'ctrl+shift+w', () => active && closeSlot(active, active.focused)],
+  closePane: ['Close pane (the tab closes with its last pane)', 'ctrl+shift+w', () => closePane(focusedPane())],
+  newTerminalPane: ['New terminal pane', 'ctrl+shift+e', () => addPane(active, { kind: 'shell' })],
+  splitRight: ['Split right: new terminal', 'alt+shift+=', () => addPane(active, { kind: 'shell' }, { placement: 'right' })],
+  splitDown: ['Split down: new terminal', 'alt+shift+-', () => addPane(active, { kind: 'shell' }, { placement: 'down' })],
+  openAgentPane: ['Open or focus agent pane', 'ctrl+shift+.', () => openAgentPane()],
+  focusAgentPane: ['Switch focus between terminal and agent', 'ctrl+shift+i', () => toggleAgentFocus()],
+  moveFocusLeft: ['Focus pane to the left', 'alt+left', () => moveFocus('left')],
+  moveFocusRight: ['Focus pane to the right', 'alt+right', () => moveFocus('right')],
+  moveFocusUp: ['Focus pane above', 'alt+up', () => moveFocus('up')],
+  moveFocusDown: ['Focus pane below', 'alt+down', () => moveFocus('down')],
+  renamePane: ['Rename pane', '', () => focusedPane() && renamePane(focusedPane())],
+  restartPane: ['Restart focused pane', '', () => focusedPane()?.restart()],
+  movePaneToNewTab: ['Move pane to a new tab', '', () => { const p = focusedPane(); if (p && tabPanes(p.tab).length > 1) movePaneToTab(p, null); }],
   closeTab: ['Close tab', '', () => active && closeTab(active)],
   nextTab: ['Next tab', 'ctrl+tab', () => cycleTab(1)],
   prevTab: ['Previous tab', 'ctrl+shift+tab', () => cycleTab(-1)],
@@ -52,22 +60,8 @@ const ACTIONS = {
   }],
   toggleSidebar: ['Toggle tab sidebar', 'ctrl+shift+s', () => api.updateSettings({ sidebarVisible: !S.sidebarVisible })],
   toggleTabLayout: ['Toggle vertical / horizontal tabs', '', () => api.updateSettings({ tabLayout: S.tabLayout === 'vertical' ? 'horizontal' : 'vertical' })],
-  toggleAgentPane: ['Toggle agent pane', 'ctrl+shift+.', () => active && toggleAgentPane(active)],
-  openShellPane: ['Open shell pane', '', () => active && openSlot(active, 'shell')],
-  openAgentPane: ['Open agent pane', '', () => active && openSlot(active, 'agent')],
-  focusAgentPane: ['Switch focus between shell and agent', 'ctrl+shift+i', () => active && focusPane(active, active.focused === 'agent' ? 'shell' : 'agent')],
-  restartAgent: ['Restart agent', '', () => active?.agent?.restart()],
-  restartShell: ['Restart shell', '', () => active?.shell?.restart()],
-  toggleSplitOrientation: ['Toggle split orientation', '', () => {
-    if (!active) return;
-    active.position = { right: 'bottom', bottom: 'right', left: 'top', top: 'left' }[active.position];
-    layoutTab(active);
-  }],
-  togglePaneZoom: ['Zoom focused pane', '', () => {
-    if (!active?.shell || !active.agent) return;
-    active.zoom = active.zoom ? null : active.focused;
-    layoutTab(active);
-  }],
+  toggleSplitOrientation: ['Toggle split orientation', '', toggleSplitOrientation],
+  togglePaneZoom: ['Zoom focused pane (toggle)', '', togglePaneZoom],
   resizePaneLeft: ['Move split left', 'alt+shift+left', () => resizePane('left')],
   resizePaneRight: ['Move split right', 'alt+shift+right', () => resizePane('right')],
   resizePaneUp: ['Move split up', 'alt+shift+up', () => resizePane('up')],
@@ -105,7 +99,7 @@ const ACTIONS = {
   toggleAlwaysOnTop: ['Toggle always on top', '', () => api.toggleWindow('alwaysOnTop')],
   agentNewline: ['Agent pane: Shift+Enter inserts a newline', 'shift+enter', () => {
     const p = focusedPane();
-    if (p?.slot !== 'agent' || p.kind === 'sbx' || !p.ptyId) return false;
+    if (!p?.isAgent || !p.ptyId) return false;
     api.write(p.ptyId, '\x1b\r'); // Meta+Enter: newline in Claude Code and most agent TUIs
   }],
   toggleDevTools: ['Toggle developer tools', 'ctrl+shift+f12', () => api.toggleWindow('devtools')],
@@ -157,37 +151,49 @@ function xtermTheme(name) {
 }
 
 // ---------------------------------------------------------------- panes
+// A pane runs one process: a shell, an agent CLI, the sbx dashboard, or a sandbox session.
+// spec: { kind: 'shell', profile } | { kind: 'agent', agentId } | { kind: 'sbx' } | { kind: 'sandbox', sandbox },
+// plus optional cwd, title and resume.
 const agentDef = id => S.agents.find(a => a.id === id);
-
-// Display name of what a slot holds (or would hold if opened).
-function slotName(tab, slot) {
-  if (slot === 'shell') return tab.profile;
-  if (tab.type === 'sbx') return 'Docker Sandboxes';
-  if (tab.type === 'sandbox') return `Sandbox: ${tab.sandbox.name}`;
-  return agentDef(tab.agentId || S.defaultAgent)?.name || 'Agent';
-}
+const PANE_ICONS = { shell: '›_', agent: '✦', sbx: '⬢', sandbox: '⧉' };
 
 class Pane {
-  constructor(tab, kind) {
+  constructor(tab, spec) {
     this.tab = tab;
-    this.kind = kind; // 'shell' | 'agent' | 'sbx' | 'sandbox'
-    this.slot = kind === 'shell' ? 'shell' : 'agent';
+    this.kind = spec.kind;
+    this.profile = spec.profile || S.defaultProfile;
+    this.agentId = spec.agentId || null;
+    this.sandbox = spec.sandbox || null;
+    this.cwd = spec.cwd || tab.cwd;   // shells: live folder; agents: where they started
+    this.customTitle = spec.title || null;
+    this.resume = !!spec.resume;      // next start resumes the agent's last conversation (restored tabs)
     this.ptyId = null;
     this.exited = false;
     this.schemeOverride = null;
-    this.resume = false;  // next start resumes the agent's last conversation (restored tabs)
     this.lastInput = 0;   // output right after input/resize/focus is an echo or redraw, not agent work
-    this.label = el('div', { className: 'pane-label' });
+    this.lastWork = 0;
     this.host = el('div', { className: 'term' });
-    this.el = el('div', { className: `pane pane-${this.slot}` }, this.label, this.host);
+    this.el = el('div', { className: `pane pane-${this.kind}` }, this.host);
   }
 
+  get isAgent() { return this.kind === 'agent' || this.kind === 'sandbox'; }
+
   def() {
-    if (this.kind === 'shell') return S.profiles.find(p => p.name === this.tab.profile);
-    if (this.kind === 'agent') return agentDef(this.tab.agentId);
-    if (this.kind === 'sandbox') return agentDef(this.tab.sandbox.agent);
+    if (this.kind === 'shell') return S.profiles.find(p => p.name === this.profile);
+    if (this.kind === 'agent') return agentDef(this.agentId);
+    if (this.kind === 'sandbox') return agentDef(this.sandbox.agent);
     return null;
   }
+
+  name() {
+    if (this.kind === 'shell') return this.profile;
+    if (this.kind === 'agent') return agentDef(this.agentId)?.name || this.agentId;
+    if (this.kind === 'sbx') return 'Docker Sandboxes';
+    return `Sandbox: ${this.sandbox.name}`;
+  }
+
+  // Tab text: your name for it, else what runs in it (shells also show their folder).
+  label() { return this.customTitle || (this.kind === 'shell' ? `${this.profile} · ${basename(this.cwd)}` : this.name()); }
 
   schemeName() { return this.schemeOverride || this.def()?.colorScheme || S.colorScheme; }
 
@@ -226,24 +232,24 @@ class Pane {
     });
     t.onSelectionChange(() => { if (S.copyOnSelect && t.hasSelection()) api.writeClipboard(t.getSelection()); });
     t.onBell(() => { if (this.tab !== active) { this.tab.attention = true; renderTabs(); } });
-    t.onTitleChange(title => { this.title = title; this.updateLabel(); });
-    t.textarea.addEventListener('focus', () => { this.lastInput = Date.now(); this.tab.focused = this.slot; markFocused(this.tab); });
+    t.onTitleChange(title => { this.title = title; updatePaneTab(this); });
+    t.textarea.addEventListener('focus', () => { this.lastInput = Date.now(); setFocused(this.tab, this); });
     if (this.kind === 'shell') {
       // The shell reports its folder at each prompt (see shell integration in settings.js).
       t.parser.registerOscHandler(9, data => {
         const m = data.match(/^9;"?([^"]*)"?$/);
-        if (m) setTabCwd(this.tab, m[1]);
+        if (m) setPaneCwd(this, m[1]);
         return !!m; // other OSC 9 messages (notifications) are not ours
       });
       t.parser.registerOscHandler(7, data => {
-        try { setTabCwd(this.tab, decodeURIComponent(new URL(data).pathname)); } catch { /* not a file URL */ }
+        try { setPaneCwd(this, decodeURIComponent(new URL(data).pathname)); } catch { /* not a file URL */ }
         return true;
       });
     }
     // Right-click, like Windows Terminal: copy the selection if there is one, otherwise paste.
     this.host.addEventListener('contextmenu', e => {
       e.preventDefault();
-      if (!copySelection(this)) { this.tab.focused = this.slot; ACTIONS.paste[2](); }
+      if (!copySelection(this)) { this.tab.focused = this; ACTIONS.paste[2](); }
     });
     // OSC 52: lets CLIs (Claude Code, tmux, vim…) put text on the clipboard. Reading it ('?') stays blocked.
     t.parser.registerOscHandler(52, data => {
@@ -266,7 +272,6 @@ class Pane {
       setFontDelta(fontDelta + (e.deltaY < 0 ? 1 : -1));
     }, { capture: true, passive: false });
     new ResizeObserver(() => this.refit()).observe(this.host);
-    this.updateLabel();
   }
 
   // In apps that capture the mouse (Claude Code, the sbx dashboard), a left-drag selects text as in a
@@ -281,7 +286,7 @@ class Pane {
     // xterm clears the selection whenever it sends the app input, and in mouse-capture mode plain mouse
     // movement and the right-button press are sent as input. While text is selected, keep those from
     // the app so the selection survives to be copied (right-click then copies it).
-    const keepsSelection = ev => this.term.modes.mouseTrackingMode !== 'none' && this.term.hasSelection();
+    const keepsSelection = () => this.term.modes.mouseTrackingMode !== 'none' && this.term.hasSelection();
     this.host.addEventListener('mousemove', ev => { if (ev.buttons === 0 && keepsSelection()) ev.stopPropagation(); }, true);
     this.host.addEventListener('mousedown', ev => { if (ev.button === 2 && keepsSelection()) ev.stopPropagation(); }, true);
     this.host.addEventListener('mousedown', down => {
@@ -309,26 +314,10 @@ class Pane {
     }, true);
   }
 
-  // Header bar: name, "+ open the other pane" when it's closed, and a close button.
-  updateLabel() {
-    const tab = this.tab;
-    const name = slotName(tab, this.slot);
-    const other = this.slot === 'shell' ? 'agent' : 'shell';
-    const otherMissing = other === 'agent' ? !(tab.agent && tab.agentVisible) : !tab.shell;
-    const title = el('span', { className: 'pane-title', textContent: this.title && this.title !== name ? `${name} — ${this.title}` : name });
-    const open = otherMissing && tab.type !== 'sbx' && el('button', {
-      className: 'pane-open', textContent: `+ ${slotName(tab, other)}`, title: `Open ${slotName(tab, other)}`,
-    });
-    if (open) open.onclick = () => openSlot(tab, other);
-    const close = el('button', { className: 'pane-close', textContent: '×', title: `Close ${name}`, ariaLabel: `Close ${name}` });
-    close.onclick = () => closeSlot(tab, this.slot);
-    this.label.replaceChildren(...[title, el('span', { className: 'spacer' }), open, close].filter(Boolean));
-  }
-
   applySettings() {
     if (!this.term) return;
     Object.assign(this.term.options, this.options());
-    this.updateLabel();
+    updatePaneTab(this);
     this.refit();
   }
 
@@ -338,12 +327,10 @@ class Pane {
   }
 
   spawnRequest() {
-    const tab = this.tab;
-    const base = { kind: this.kind, cwd: tab.cwd, cols: this.term.cols, rows: this.term.rows };
-    if (this.kind === 'shell') return { ...base, name: tab.profile };
-    // A resumed agent must start where its conversation was, even if the shell has moved on.
-    if (this.kind === 'agent') return { ...base, name: tab.agentId, resume: this.resume, cwd: (this.resume && tab.agentCwd) || tab.cwd };
-    if (this.kind === 'sandbox') return { ...base, name: tab.sandbox.name, args: tab.sandbox.args };
+    const base = { kind: this.kind, cwd: this.cwd, cols: this.term.cols, rows: this.term.rows };
+    if (this.kind === 'shell') return { ...base, name: this.profile };
+    if (this.kind === 'agent') return { ...base, name: this.agentId, resume: this.resume };
+    if (this.kind === 'sandbox') return { ...base, name: this.sandbox.name, args: this.sandbox.args };
     return base; // sbx
   }
 
@@ -354,8 +341,12 @@ class Pane {
     try {
       const { id, cwd } = await api.spawn(this.spawnRequest());
       if (this.disposed) return api.kill(id);
-      if (this.slot === 'shell' || !this.tab.shell) this.tab.cwd = cwd;
-      if (this.kind === 'agent') { this.tab.agentStarted = Date.now(); this.tab.agentCwd = cwd; }
+      if (this.kind === 'shell') setPaneCwd(this, cwd);
+      else {
+        this.cwd = cwd;
+        if (!tabPanes(this.tab).some(p => p.kind === 'shell')) this.tab.cwd = cwd;
+      }
+      if (this.kind === 'agent') this.agentStarted = Date.now();
       this.resume = false;
       // Agents only work after you give them something: startup banners and resumed history don't count.
       this.armed = false;
@@ -390,27 +381,38 @@ class Pane {
   dispose() { this.disposed = true; this.kill(); this.term?.dispose(); this.el.remove(); }
 }
 
+const paneJson = p => ({ kind: p.kind, profile: p.profile, agentId: p.agentId, sandbox: p.sandbox, cwd: p.cwd, title: p.customTitle });
+
 function deliver(p, ev) {
   if ('exit' in ev) return p.markExited(ev.exit);
   p.term.write(ev.data);
   const now = Date.now();
-  if (p.slot === 'agent' && p.armed && now - p.lastInput > 500) {
+  if (p.isAgent && p.armed && now - p.lastInput > 500) {
+    p.lastWork = now;
     p.tab.lastAgentOutput = now;
     p.tab.busySince ||= now;
   }
 }
 
-// Called from the shell's cwd reports. Only accepts real host paths (not e.g. WSL's /home/...).
-function setTabCwd(tab, dir) {
+// Called with a shell's folder reports. Only accepts real host paths (not e.g. WSL's /home/...).
+// The sidebar and git status follow the terminal you used last.
+function setPaneCwd(pane, dir) {
   if (api.platform === 'win32') {
     dir = dir.replace(/^\/([a-zA-Z]):?\//, '$1:/').replace(/\//g, '\\'); // file:///C:/x and Git Bash /c/x
     if (!/^[a-zA-Z]:\\/.test(dir)) return;
   } else if (!dir.startsWith('/')) return;
-  if (dir === tab.cwd) return;
-  tab.cwd = dir;
-  renderTabs();
-  refreshInfo([tab]);
+  const changed = pane.cwd !== dir;
+  pane.cwd = dir;
+  const tab = pane.tab;
+  if (!tabPanes(tab).includes(tab.cwdPane)) tab.cwdPane = pane;
+  if (tab.cwdPane === pane && tab.cwd !== dir) {
+    tab.cwd = dir;
+    renderTabs();
+    refreshInfo([tab]);
+  }
+  if (changed) updatePaneTab(pane);
 }
+
 // Output can arrive before spawn() resolves; buffer it. Ids already seen belong to killed panes.
 function onPtyEvent(id, ev) {
   const p = panes.get(id);
@@ -431,34 +433,62 @@ function copySelection(p) {
   return true;
 }
 
-const tabPanes = tab => [tab.shell, tab.agent].filter(Boolean);
-const primaryPane = tab => tab.shell || tab.agent;
+const tabPanes = tab => Layout.panes(tab?.root);
+const primaryPane = tab => tabPanes(tab)[0];
+const primaryAgent = tab => (tab.focused?.kind === 'agent' && tabPanes(tab).includes(tab.focused) && tab.focused)
+  || tabPanes(tab).find(p => p.kind === 'agent') || null;
+
+function focusedPane(tab = active) {
+  const all = tabPanes(tab);
+  return all.includes(tab?.focused) ? tab.focused : all[0] || null;
+}
 
 // ---------------------------------------------------------------- tabs
+// Tab types: 'workspace' (terminals + agents in one folder), 'sbx' (the Docker Sandboxes TUI, full window),
+// 'sandbox' (a sandbox session opened from the sbx TUI + a host shell in its workspace).
+// Each tab's panes live in tab.root, a layout tree of split groups (see layout.js).
+
+// The first layout of a new tab: a terminal and the agent, arranged per the "agentPanePosition" setting.
+// Also reads tabs saved by older versions (shell/agent/position/size).
+function initialLayout(tab, o) {
+  const shell = o.shell !== false && tab.type !== 'sbx' && new Pane(tab, { kind: 'shell', profile: o.profile, cwd: tab.cwd });
+  const agentSpec = tab.type === 'sbx' ? { kind: 'sbx' }
+    : tab.type === 'sandbox' ? { kind: 'sandbox', sandbox: tab.sandbox }
+      : o.agentId && o.agent !== false && { kind: 'agent', agentId: o.agentId, cwd: o.agentCwd || tab.cwd, resume: o.resume };
+  const agent = agentSpec && new Pane(tab, agentSpec);
+  if (!shell || !agent) return Layout.group([shell || agent].filter(Boolean));
+  const pos = o.position || S.agentPanePosition;
+  if (pos === 'tab') return Layout.group([shell, agent], 1);
+  const g = Layout.group([shell]);
+  const root = Layout.splitAt(g, g, Layout.group([agent]), pos);
+  const agentShare = clamp((o.size || S.agentPaneSize) / 100, 0.1, 0.9);
+  root.sizes = root.children.map(c => (c.panes.includes(agent) ? agentShare : 1 - agentShare));
+  return root;
+}
+
 async function createTab(o) {
   const tab = {
-    id: ++tabSeq, type: o.type, color: o.color || null, cwd: o.cwd ?? S.startingDirectory, profile: o.profile || S.defaultProfile,
-    agentId: o.agentId || null, agentCwd: o.agentCwd || null, sandbox: o.sandbox || null, title: o.title || null,
-    position: o.position || S.agentPanePosition, size: o.size || S.agentPaneSize, zoom: null,
-    agentVisible: o.agentVisible ?? true, focused: 'agent', shell: null, agent: null,
-    info: {}, attention: false, done: false, lastAgentOutput: 0, busySince: 0, agentStarted: 0,
+    id: ++tabSeq, type: o.type, color: o.color || null, cwd: o.cwd ?? S.startingDirectory, title: o.title || null,
+    sandbox: o.sandbox || null, root: null, focused: null, cwdPane: null, zoom: null,
+    info: {}, attention: false, done: false, lastAgentOutput: 0, busySince: 0,
   };
-  tab.view = el('div', { className: 'view' });
-  tab.divider = el('div', { className: 'divider', role: 'separator', ariaLabel: 'Resize split' });
-  tab.view.append(tab.divider);
-  setupDivider(tab);
+  tab.view = el('div', { className: `view type-${tab.type}` });
   if (o.atStart) tabs.unshift(tab);
   else tabs.push(tab);
   $('#views').append(tab.view);
-  if (o.shell !== false) addPane(tab, 'shell');
-  const agentKind = { workspace: tab.agentId && 'agent', sbx: 'sbx', sandbox: 'sandbox' }[tab.type];
-  if (agentKind && o.agent !== false) addPane(tab, agentKind).resume = !!o.resume;
-  if (!tab.agent) { tab.focused = 'shell'; tab.agentVisible = true; }
-  tab.view.classList.add('active'); // xterm must measure its cell size while visible...
-  for (const p of tabPanes(tab)) p.open(); // ...so open before layout can hide a pane
-  layoutTab(tab);
-  tab.view.classList.add('active');
-  const starting = tabPanes(tab).map(p => p.start()); // start() fits synchronously before awaiting
+  if (o.adopt) {
+    o.adopt.tab = tab;
+    tab.root = Layout.group([o.adopt]);
+  } else {
+    tab.root = o.layout && Layout.deserialize(o.layout, j => new Pane(tab, { ...j, resume: o.resume }));
+    tab.root ||= initialLayout(tab, o);
+  }
+  tab.focused = tabPanes(tab).find(p => p.isAgent) || tabPanes(tab)[0];
+  const fresh = tabPanes(tab).filter(p => !p.term);
+  tab.view.classList.add('active'); // xterm must measure its cell size while visible
+  renderLayout(tab);
+  fresh.forEach(p => p.open());
+  const starting = fresh.map(p => p.start()); // start() fits synchronously before awaiting
   if (o.activate === false) { tab.view.classList.remove('active'); renderTabs(); } else activate(tab);
   await Promise.all(starting);
   renderTabs();
@@ -470,12 +500,71 @@ function newTab({ cwd, profile, agent = S.defaultAgent } = {}) {
   return createTab({ type: 'workspace', cwd, profile, agentId: agent });
 }
 
-function addPane(tab, kind) {
-  const p = new Pane(tab, kind);
-  tab[p.slot] = p;
-  if (p.slot === 'shell') tab.view.prepend(p.el);
-  else tab.view.append(p.el);
+// Adds a pane to a tab: as a tab in a group, or split off to the right / below it.
+function addPane(tab, spec, { group, placement = S.newPanePlacement } = {}) {
+  if (!tab || tab.type === 'sbx') return null;
+  const g = group || Layout.groupOf(tab.root, focusedPane(tab)) || Layout.groups(tab.root)[0];
+  const p = new Pane(tab, { ...spec, cwd: spec.cwd || focusedPane(tab)?.cwd || tab.cwd });
+  if (placement === 'right' || placement === 'down') tab.root = Layout.splitAt(tab.root, g, Layout.group([p]), placement === 'right' ? 'right' : 'bottom');
+  else Layout.addToGroup(g, p);
+  tab.zoom = null;
+  renderLayout(tab);
+  p.open();
+  p.start();
+  focusPane(tab, p);
+  renderTabs();
   return p;
+}
+
+function closePane(pane) {
+  const tab = pane?.tab;
+  if (!tab) return;
+  pane.dispose();
+  tab.root = Layout.removePane(tab.root, pane);
+  if (!tab.root) return closeTab(tab);
+  if (tab.cwdPane === pane) tab.cwdPane = null;
+  if (tab.focused === pane) tab.focused = null;
+  if (tab.zoom && !Layout.groups(tab.root).includes(tab.zoom)) tab.zoom = null;
+  renderLayout(tab);
+  if (tab === active) focusPane(tab, focusedPane(tab));
+  renderTabs();
+}
+
+// Moves a pane to another tab (into its focused group), or to a new tab when dest is null.
+function movePaneToTab(pane, dest) {
+  const src = pane.tab;
+  src.root = Layout.removePane(src.root, pane);
+  if (src.focused === pane) src.focused = null;
+  if (src.cwdPane === pane) src.cwdPane = null;
+  if (dest) {
+    pane.tab = dest;
+    Layout.addToGroup(Layout.groupOf(dest.root, focusedPane(dest)) || Layout.groups(dest.root)[0], pane);
+    renderLayout(dest);
+  }
+  if (src.root) renderLayout(src);
+  else closeTab(src); // nothing left behind; the moved pane keeps running
+  if (dest) { activate(dest); focusPane(dest, pane); }
+  else createTab({ type: pane.kind === 'sandbox' ? 'sandbox' : 'workspace', sandbox: pane.sandbox, cwd: pane.cwd, adopt: pane });
+  renderTabs();
+}
+
+function openAgentPane(tab = active) {
+  if (!tab || tab.type === 'sbx') return;
+  const agents = tabPanes(tab).filter(p => p.isAgent);
+  if (agents.length) return focusPane(tab, agents[(agents.indexOf(tab.focused) + 1) % agents.length]);
+  const placement = S.newPanePlacement === 'tab' ? 'right' : S.newPanePlacement;
+  if (tab.type === 'sandbox') return addPane(tab, { kind: 'sandbox', sandbox: tab.sandbox }, { placement });
+  const agentId = S.defaultAgent || S.agents[0]?.id;
+  if (agentId) addPane(tab, { kind: 'agent', agentId }, { placement });
+}
+
+function toggleAgentFocus(tab = active) {
+  if (!tab) return;
+  const cur = focusedPane(tab);
+  const target = cur?.isAgent
+    ? (tabPanes(tab).includes(tab.cwdPane) ? tab.cwdPane : tabPanes(tab).find(p => p.kind === 'shell'))
+    : tabPanes(tab).find(p => p.isAgent);
+  if (target) focusPane(tab, target);
 }
 
 async function openFolderTab() {
@@ -491,7 +580,7 @@ function ensureSbxTab({ activate: show }) {
 
 // Called when the sbx TUI opens a sandbox in an "external terminal".
 async function openSandboxTab({ args, name }) {
-  const open = tabs.find(t => t.type === 'sandbox' && t.sandbox.name === name && t.agent?.ptyId);
+  const open = tabs.find(t => t.type === 'sandbox' && t.sandbox?.name === name && tabPanes(t).some(p => p.kind === 'sandbox' && p.ptyId));
   if (open) return activate(open);
   const sb = (await api.sbxList()).find(s => s.name === name);
   const workspace = sb?.workspaces?.[0];
@@ -512,47 +601,14 @@ function closeTab(tab) {
   else renderTabs();
 }
 
-// Closing a pane works like closing a tab; when both panes are gone the tab closes.
-function closeSlot(tab, slot) {
-  const pane = tab[slot];
-  if (!pane) return;
-  pane.dispose();
-  tab[slot] = null;
-  if (!tab.shell && !tab.agent) return closeTab(tab);
-  if (!tab.shell) tab.agentVisible = true; // never leave a tab with only a hidden pane
-  tab.zoom = null;
-  layoutTab(tab);
-  focusPane(tab, slot === 'shell' ? 'agent' : 'shell');
-  renderTabs();
-}
-
-function openSlot(tab, slot) {
-  if (tab.type === 'sbx') return;
-  if (slot === 'agent' && tab.agent) {
-    tab.agentVisible = true;
-  } else if (!tab[slot]) {
-    if (slot === 'agent' && tab.type === 'workspace') {
-      tab.agentId = tab.agentId || S.defaultAgent || S.agents[0]?.id;
-      if (!tab.agentId) return;
-    }
-    const p = addPane(tab, slot === 'shell' ? 'shell' : tab.type === 'sandbox' ? 'sandbox' : 'agent');
-    if (slot === 'agent') tab.agentVisible = true;
-    layoutTab(tab);
-    p.open();
-    p.start();
-  }
-  layoutTab(tab);
-  focusPane(tab, slot);
-  renderTabs();
-}
-
 function activate(tab) {
   if (!tab) return;
   active = tab;
   tab.attention = false;
   tab.done = false;
   for (const t of tabs) t.view.classList.toggle('active', t === tab);
-  document.documentElement.style.setProperty('--term-bg', scheme(primaryPane(tab).schemeName()).background);
+  const first = primaryPane(tab);
+  if (first) document.documentElement.style.setProperty('--term-bg', scheme(first.schemeName()).background);
   renderTabs();
   requestAnimationFrame(() => {
     for (const p of tabPanes(tab)) p.refit();
@@ -575,73 +631,371 @@ function moveTab(dir) {
   renderTabs();
 }
 
-function focusedPane(tab = active) {
-  if (!tab) return null;
-  const agentShown = tab.agent && tab.agentVisible;
-  return (tab.focused === 'agent' && agentShown) || !tab.shell ? tab.agent : tab.shell;
+function focusPane(tab, pane) {
+  if (!tab) return;
+  pane = tabPanes(tab).includes(pane) ? pane : focusedPane(tab);
+  if (!pane) return;
+  const g = Layout.groupOf(tab.root, pane);
+  if (tab.zoom && tab.zoom !== g) { tab.zoom = null; renderLayout(tab); }
+  if (g.panes[g.active] !== pane) { g.active = g.panes.indexOf(pane); updateGroup(g); }
+  setFocused(tab, pane);
+  if (tab === active) pane.term?.focus();
 }
 
-function focusPane(tab, slot) {
-  if (slot === 'agent' && !(tab.agent && tab.agentVisible)) slot = 'shell';
-  if (slot === 'shell' && !tab.shell) slot = 'agent';
-  if (tab.zoom && tab.zoom !== slot) { tab.zoom = slot; layoutTab(tab); }
-  tab.focused = slot;
-  focusedPane(tab)?.term?.focus();
+// Records which pane has focus. Focusing a terminal also points the sidebar at its folder.
+function setFocused(tab, pane) {
+  tab.focused = pane;
+  if (pane.kind === 'shell' && tab.cwdPane !== pane) {
+    tab.cwdPane = pane;
+    if (tab.cwd !== pane.cwd) { tab.cwd = pane.cwd; renderTabs(); refreshInfo([tab]); }
+  }
   markFocused(tab);
 }
 
 function markFocused(tab) {
-  tab.shell?.el.classList.toggle('focused', tab.focused === 'shell');
-  tab.agent?.el.classList.toggle('focused', tab.focused === 'agent');
-}
-
-function toggleAgentPane(tab) {
-  if (tab.type === 'sbx') return;
-  if (!tab.agent || !tab.agentVisible) return openSlot(tab, 'agent');
-  if (!tab.shell) return; // hiding the only pane would leave an empty tab
-  tab.agentVisible = false;
-  if (tab.zoom === 'agent') tab.zoom = null;
-  layoutTab(tab);
-  focusPane(tab, 'shell');
-  renderTabs();
+  for (const g of Layout.groups(tab.root)) g.box?.classList.toggle('focused', g.panes.includes(tab.focused));
 }
 
 function switchAgent(id) {
   const tab = active;
   if (tab?.type !== 'workspace') return;
-  tab.agentId = id;
+  const p = focusedPane(tab);
+  if (p?.kind !== 'agent') return addPane(tab, { kind: 'agent', agentId: id });
+  p.agentId = id;
+  p.title = null;
   tab.info.model = null;
-  if (!tab.agent) return openSlot(tab, 'agent');
-  tab.agent.title = null;
-  tab.agent.applySettings();
-  tab.agent.restart();
-  openSlot(tab, 'agent');
+  p.applySettings();
+  p.restart();
 }
 
-function layoutTab(tab) {
-  const showShell = !!tab.shell;
-  const showAgent = !!tab.agent && tab.agentVisible;
-  const both = showShell && showAgent;
-  tab.view.className = ['view', `pos-${tab.position}`, `type-${tab.type}`, tab === active && 'active', both && tab.zoom && `zoom-${tab.zoom}`]
-    .filter(Boolean).join(' ');
-  tab.divider.hidden = !both;
-  if (tab.agent) {
-    tab.agent.el.hidden = !showAgent;
-    tab.agent.el.style.flex = both ? `0 0 ${tab.size}%` : '1 1 0';
-  }
-  for (const p of tabPanes(tab)) if (p.term) p.updateLabel();
+// ---------------------------------------------------------------- layout rendering
+// Rebuilds the split/group DOM of a tab. Pane elements (and their running xterms) are moved, not recreated.
+function renderLayout(tab) {
+  if (!tab.root) return;
+  const node = tab.zoom && Layout.groups(tab.root).includes(tab.zoom) ? tab.zoom : tab.root;
+  const hadFocus = tab.view.contains(document.activeElement);
+  tab.view.replaceChildren(buildNode(tab, node));
+  tab.view.classList.toggle('zoomed', node !== tab.root);
+  markFocused(tab);
+  if (hadFocus) focusedPane(tab)?.term?.focus();
   scheduleSave();
 }
 
+function buildNode(tab, node) {
+  if (node.kind === 'group') return buildGroup(tab, node);
+  const box = el('div', { className: `split split-${node.dir}` });
+  node.children.forEach((c, i) => {
+    if (i) box.append(gutter(tab, node, i - 1, box));
+    const child = buildNode(tab, c);
+    child.style.flex = `${node.sizes[i]} 1 0`;
+    box.append(child);
+  });
+  return box;
+}
+
+function buildGroup(tab, g) {
+  g.strip = el('div', { className: 'pane-strip', role: 'tablist' });
+  g.body = el('div', { className: 'group-body' }, ...g.panes.map(p => p.el));
+  g.box = el('div', { className: 'group' }, g.strip, g.body);
+  g.box.addEventListener('pointerdown', () => { if (!g.panes.includes(tab.focused)) focusPane(tab, g.panes[g.active]); }, true);
+  renderStrip(tab, g);
+  updateGroup(g);
+  return g.box;
+}
+
+// Shows the group's active pane; the others stay laid out (so xterm can measure them) but hidden.
+function updateGroup(g) {
+  g.panes.forEach((p, i) => {
+    p.el.classList.toggle('inactive', i !== g.active);
+    p.tabEl?.classList.toggle('active', i === g.active);
+    p.tabEl?.setAttribute('aria-selected', String(i === g.active));
+  });
+  requestAnimationFrame(() => g.panes[g.active]?.refit());
+  scheduleSave();
+}
+
+function renderStrip(tab, g) {
+  const add = el('button', { className: 'strip-add', textContent: '+', title: 'New terminal or agent', ariaLabel: 'New terminal or agent' });
+  add.onclick = () => showAddMenu(tab, g, add);
+  g.strip.replaceChildren(...g.panes.map(p => paneTab(tab, p)), add);
+}
+
+function paneTab(tab, p) {
+  const close = el('button', { className: 'ptab-close', textContent: '×' });
+  close.onpointerdown = e => e.stopPropagation();
+  close.onclick = e => { e.stopPropagation(); closePane(p); };
+  const t = p.tabEl = el('div', { className: 'ptab', role: 'tab' },
+    el('span', { className: 'ptab-icon', ariaHidden: 'true' }), el('span', { className: 'ptab-title' }), close);
+  updatePaneTab(p);
+  t.onpointerdown = e => startPaneDrag(e, tab, p, t);
+  t.onauxclick = e => { if (e.button === 1) closePane(p); };
+  t.ondblclick = () => renamePane(p);
+  t.oncontextmenu = e => { e.preventDefault(); showPaneMenu(p, { left: e.clientX, top: e.clientY, bottom: e.clientY }); };
+  return t;
+}
+
+function updatePaneTab(p) {
+  const t = p.tabEl;
+  if (!t) return;
+  t.querySelector('.ptab-icon').textContent = PANE_ICONS[p.kind];
+  const title = t.querySelector('.ptab-title');
+  if (title) title.textContent = p.label();
+  t.title = [p.name(), p.cwd, p.title].filter(Boolean).join('\n');
+  const close = t.querySelector('.ptab-close');
+  close.title = `Close ${p.label()} (Ctrl+Shift+W)`;
+  close.ariaLabel = `Close ${p.label()}`;
+}
+
+function renamePane(p) {
+  const span = p.tabEl?.querySelector('.ptab-title');
+  if (!span) return;
+  let finished = false;
+  const input = el('input', { className: 'ptab-input', value: p.label(), ariaLabel: 'Pane name' });
+  const done = save => {
+    if (finished) return;
+    finished = true;
+    if (save) p.customTitle = input.value.trim() || null;
+    input.replaceWith(span);
+    updatePaneTab(p);
+    scheduleSave();
+    focusPane(p.tab, p);
+  };
+  input.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); };
+  input.onblur = () => done(true);
+  input.onpointerdown = e => e.stopPropagation();
+  span.replaceWith(input);
+  input.select();
+  input.focus();
+}
+
+function gutter(tab, node, index, box) {
+  const g = el('div', { className: `gutter gutter-${node.dir}`, role: 'separator', ariaLabel: 'Resize panes' });
+  g.onpointerdown = e => {
+    g.setPointerCapture(e.pointerId);
+    const r = box.getBoundingClientRect();
+    const total = node.dir === 'row' ? r.width : r.height;
+    let last = node.dir === 'row' ? e.clientX : e.clientY;
+    g.onpointermove = ev => {
+      const pos = node.dir === 'row' ? ev.clientX : ev.clientY;
+      Layout.resize(node, index, (pos - last) / total);
+      last = pos;
+      [...box.children].filter(c => !c.classList.contains('gutter')).forEach((c, i) => { c.style.flex = `${node.sizes[i]} 1 0`; });
+    };
+    g.onpointerup = () => { g.onpointermove = g.onpointerup = null; scheduleSave(); };
+  };
+  return g;
+}
+
+function showAddMenu(tab, g, anchor) {
+  const add = spec => addPane(tab, spec, { group: g });
+  const seg = el('div', { className: 'menu-seg', role: 'radiogroup', ariaLabel: 'Open new panes as' },
+    ...[['tab', 'Tab'], ['right', 'Split right'], ['down', 'Split down']].map(([v, l]) => {
+      const b = el('button', { textContent: l, className: S.newPanePlacement === v ? 'on' : '', role: 'radio' });
+      b.setAttribute('aria-checked', String(S.newPanePlacement === v));
+      b.onclick = e => {
+        e.stopPropagation();
+        set('newPanePlacement', v);
+        for (const x of seg.children) { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }
+      };
+      return b;
+    }));
+  showMenu(anchor, [
+    'Terminal',
+    ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => add({ kind: 'shell', profile: p.name }) })),
+    '-', 'Agent',
+    tab.type === 'sandbox' && { label: `Sandbox: ${tab.sandbox.name}`, run: () => add({ kind: 'sandbox', sandbox: tab.sandbox }) },
+    ...S.agents.map(a => ({ label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
+    '-', 'Open new panes as', seg,
+  ]);
+}
+
+function showPaneMenu(p, at) {
+  const multi = tabPanes(p.tab).length > 1;
+  showMenu(at, [
+    { label: 'Rename', run: () => renamePane(p) },
+    { label: 'Restart', run: () => p.restart() },
+    multi && { label: 'Split right', run: () => dropPane(p.tab, p, { kind: 'group', group: Layout.groupOf(p.tab.root, p), side: 'right' }) },
+    multi && { label: 'Split down', run: () => dropPane(p.tab, p, { kind: 'group', group: Layout.groupOf(p.tab.root, p), side: 'bottom' }) },
+    multi && { label: 'Move to new tab', run: () => movePaneToTab(p, null) },
+    '-',
+    { label: 'Close', run: () => closePane(p) },
+  ]);
+}
+
+// ---------------------------------------------------------------- dragging panes (Windows-style snap)
+// Drag a pane's tab onto: a pane's edge (split there), its middle (join as a tab), a tab strip (insert),
+// a sidebar tab (move to that tab) or empty sidebar space (new tab). A highlight previews the result.
+function startPaneDrag(down, tab, pane, src) {
+  if (down.button !== 0) return;
+  focusPane(tab, pane);
+  down.preventDefault();
+  src.setPointerCapture(down.pointerId);
+  let dragging = false, target = null;
+  const ghost = el('div', { className: 'drag-ghost', textContent: `${PANE_ICONS[pane.kind]}  ${pane.label()}` });
+  const move = ev => {
+    if (!dragging) {
+      if (Math.hypot(ev.clientX - down.clientX, ev.clientY - down.clientY) < 6) return;
+      dragging = true;
+      document.body.append(ghost);
+      document.body.classList.add('dragging-pane');
+      src.classList.add('drag-source');
+    }
+    ghost.style.transform = `translate(${ev.clientX + 14}px, ${ev.clientY + 10}px)`;
+    target = dropTarget(tab, pane, ev.clientX, ev.clientY);
+    showSnap(target);
+  };
+  const end = drop => {
+    src.removeEventListener('pointermove', move);
+    src.removeEventListener('pointerup', up);
+    src.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('keydown', esc, true);
+    ghost.remove();
+    showSnap(null);
+    src.classList.remove('drag-source');
+    document.body.classList.remove('dragging-pane');
+    if (drop && dragging && target) dropPane(tab, pane, target);
+  };
+  const up = () => end(true);
+  const cancel = () => end(false);
+  const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); end(false); } };
+  src.addEventListener('pointermove', move);
+  src.addEventListener('pointerup', up);
+  src.addEventListener('pointercancel', cancel);
+  window.addEventListener('keydown', esc, true);
+}
+
+function dropTarget(tab, pane, x, y) {
+  const at = document.elementFromPoint(x, y);
+  if (!at) return null;
+  const alone = tabPanes(tab).length === 1;
+  const sideItem = at.closest('#tabs .tab');
+  if (sideItem) {
+    const dest = tabs[[...$('#tabs').children].indexOf(sideItem)];
+    if (!dest || dest === tab || dest.type === 'sbx') return null;
+    return { kind: 'tab', tab: dest, rect: sideItem.getBoundingClientRect(), label: `Move to ${tabTitle(dest)}` };
+  }
+  if (at.closest('#tabbar')) {
+    return alone ? null : { kind: 'newtab', rect: $('#tabs').getBoundingClientRect(), label: 'Open in a new tab' };
+  }
+  const box = at.closest('.group');
+  const g = box && tab.view.contains(box) && Layout.groups(tab.root).find(n => n.box === box);
+  if (!g) return null;
+  const own = Layout.groupOf(tab.root, pane);
+  const strip = at.closest('.pane-strip');
+  if (strip) {
+    const tabEls = [...strip.querySelectorAll('.ptab')];
+    let index = tabEls.findIndex(t => { const r = t.getBoundingClientRect(); return x < r.left + r.width / 2; });
+    if (index < 0) index = tabEls.length;
+    const ref = tabEls[index] || tabEls.at(-1);
+    const rr = ref.getBoundingClientRect();
+    return { kind: 'group', group: g, side: 'center', index, rect: g.body.getBoundingClientRect(),
+      marker: { x: tabEls[index] ? rr.left - 2 : rr.right + 1, top: rr.top, height: rr.height }, label: g === own ? 'Move here' : 'Add as a tab' };
+  }
+  const rect = g.body.getBoundingClientRect();
+  const side = Layout.dropZone(rect, x, y, clamp(S.snapEdge, 10, 45) / 100);
+  if (g === own && (side === 'center' || g.panes.length === 1)) return null; // would land where it already is
+  const labels = { left: 'Split left', right: 'Split right', top: 'Split up', bottom: 'Split down', center: 'Add as a tab' };
+  return { kind: 'group', group: g, side, rect: Layout.zoneRect(rect, side), label: labels[side] };
+}
+
+function showSnap(target) {
+  const box = $('#snap-overlay'), marker = $('#snap-marker');
+  marker.hidden = !target?.marker;
+  if (target?.marker) Object.assign(marker.style, { left: `${target.marker.x}px`, top: `${target.marker.top}px`, height: `${target.marker.height}px` });
+  if (!target || !S.snapPreview) { box.hidden = true; return; }
+  const wasHidden = box.hidden;
+  box.classList.toggle('animate', S.paneAnimations && !wasHidden); // don't animate in from the last spot
+  const r = target.rect;
+  Object.assign(box.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+  box.firstElementChild.textContent = target.label;
+  box.hidden = false;
+}
+
+function dropPane(tab, pane, target) {
+  if (target.kind === 'tab') return movePaneToTab(pane, target.tab);
+  if (target.kind === 'newtab') return movePaneToTab(pane, null);
+  tab.root = Layout.movePane(tab.root, pane, target.group, target.side, target.index);
+  tab.zoom = null;
+  renderLayout(tab);
+  focusPane(tab, pane);
+}
+
+// ---------------------------------------------------------------- keyboard pane commands
+function resizePane(dir) {
+  const tab = active;
+  let node = tab && Layout.groupOf(tab.root, focusedPane(tab));
+  if (!node) return false;
+  const want = dir === 'left' || dir === 'right' ? 'row' : 'col';
+  for (let at = Layout.parentOf(tab.root, node); at; node = at.parent, at = Layout.parentOf(tab.root, node)) {
+    if (at.parent.dir !== want) continue;
+    const grow = dir === 'right' || dir === 'down' ? 0.05 : -0.05;
+    Layout.resize(at.parent, at.index < at.parent.children.length - 1 ? at.index : at.index - 1, grow);
+    renderLayout(tab);
+    return true;
+  }
+  return false;
+}
+
+// Focus the nearest pane group in a direction. Returns false (key goes to the terminal) when there is none.
+function moveFocus(dir) {
+  const tab = active, cur = focusedPane(tab);
+  const own = cur && Layout.groupOf(tab.root, cur);
+  if (!own?.box?.isConnected) return false;
+  const from = own.box.getBoundingClientRect();
+  const cx = from.left + from.width / 2, cy = from.top + from.height / 2;
+  let best = null, bestDist = Infinity;
+  for (const g of Layout.groups(tab.root)) {
+    if (g === own || !g.box?.isConnected) continue;
+    const r = g.box.getBoundingClientRect();
+    const inDir = { left: r.right <= from.left + 2, right: r.left >= from.right - 2, up: r.bottom <= from.top + 2, down: r.top >= from.bottom - 2 }[dir];
+    const d = Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy);
+    if (inDir && d < bestDist) { best = g; bestDist = d; }
+  }
+  if (!best) return false;
+  focusPane(tab, best.panes[best.active]);
+  return true;
+}
+
+function toggleSplitOrientation() {
+  const tab = active;
+  const at = tab && Layout.parentOf(tab.root, Layout.groupOf(tab.root, focusedPane(tab)));
+  if (!at) return;
+  at.parent.dir = at.parent.dir === 'row' ? 'col' : 'row';
+  tab.root = Layout.normalize(tab.root);
+  renderLayout(tab);
+}
+
+function togglePaneZoom() {
+  const tab = active;
+  if (!tab || Layout.groups(tab.root).length < 2) return;
+  tab.zoom = tab.zoom ? null : Layout.groupOf(tab.root, focusedPane(tab));
+  renderLayout(tab);
+  focusPane(tab, focusedPane(tab));
+}
+
+function setFontDelta(d) {
+  fontDelta = clamp(d, 6 - S.fontSize, 72 - S.fontSize);
+  for (const t of tabs) for (const p of tabPanes(t)) p.applySettings();
+}
+
+function setPaneScheme(name) {
+  const p = focusedPane();
+  if (!p) return;
+  p.schemeOverride = name;
+  p.applySettings();
+  if (p === primaryPane(active)) document.documentElement.style.setProperty('--term-bg', scheme(name).background);
+}
+
 // ---------------------------------------------------------------- session (reopen tabs on launch)
-// The sbx tab isn't saved: it comes back from the sandboxEnabled setting.
+// The sbx tab isn't saved: it comes back from the sandboxEnabled setting. Each tab saves its whole
+// pane layout (splits, groups, which pane is active, sizes); older sessions without one still load.
 function sessionState() {
-  const saved = tabs.filter(t => t.type !== 'sbx');
+  const saved = tabs.filter(t => t.type !== 'sbx' && t.root);
   return {
     active: active?.type === 'sbx' ? 'sbx' : saved.indexOf(active),
     tabs: saved.map(t => ({
-      type: t.type, cwd: t.cwd, agentCwd: t.agentCwd, profile: t.profile, agentId: t.agentId, sandbox: t.sandbox,
-      title: t.title, color: t.color, position: t.position, size: t.size, agentVisible: t.agentVisible, shell: !!t.shell, agent: !!t.agent,
+      type: t.type, cwd: t.cwd, sandbox: t.sandbox, title: t.title, color: t.color,
+      layout: Layout.serialize(t.root, paneJson),
     })),
   };
 }
@@ -663,48 +1017,6 @@ async function restoreSession(s) {
   const target = await created[s.active];
   activate(target || tabs.find(t => t.type !== 'sbx') || tabs[0]);
   await Promise.all(created);
-}
-
-function setupDivider(tab) {
-  const d = tab.divider;
-  d.addEventListener('pointerdown', e => {
-    d.setPointerCapture(e.pointerId);
-    const move = ev => {
-      const r = tab.view.getBoundingClientRect();
-      const frac = {
-        right: (r.right - ev.clientX) / r.width, left: (ev.clientX - r.left) / r.width,
-        bottom: (r.bottom - ev.clientY) / r.height, top: (ev.clientY - r.top) / r.height,
-      }[tab.position];
-      tab.size = clamp(frac * 100, 10, 90);
-      layoutTab(tab);
-    };
-    const up = () => { d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up); };
-    d.addEventListener('pointermove', move);
-    d.addEventListener('pointerup', up);
-  });
-}
-
-function resizePane(dir) {
-  const t = active;
-  if (!t?.shell || !t.agent || !t.agentVisible) return;
-  // Moving the split toward the agent's side shrinks the agent pane.
-  const sign = { right: { left: 1, right: -1 }, left: { left: -1, right: 1 }, bottom: { up: 1, down: -1 }, top: { up: -1, down: 1 } }[t.position][dir];
-  if (!sign) return;
-  t.size = clamp(t.size + 5 * sign, 10, 90);
-  layoutTab(t);
-}
-
-function setFontDelta(d) {
-  fontDelta = clamp(d, 6 - S.fontSize, 72 - S.fontSize);
-  for (const t of tabs) for (const p of tabPanes(t)) p.applySettings();
-}
-
-function setPaneScheme(name) {
-  const p = focusedPane();
-  if (!p) return;
-  p.schemeOverride = name;
-  p.applySettings();
-  if (p === primaryPane(active)) document.documentElement.style.setProperty('--term-bg', scheme(name).background);
 }
 
 // ---------------------------------------------------------------- tab list
@@ -732,14 +1044,15 @@ function tabMetas(tab) {
       className: 'meta', textContent: list ? `Docker Sandboxes · ${list.filter(s => s.status === 'running').length} running / ${list.length}` : 'Docker Sandboxes',
     })];
   }
+  const agent = primaryAgent(tab);
+  const moreAgents = tabPanes(tab).filter(p => p.kind === 'agent').length - 1;
   const agentLine = tab.type === 'sandbox'
     ? `⧉ sandbox · ${[tab.sandbox.agent, tab.info.status].filter(Boolean).join(' · ')}`
-    : tab.agentId && `✦ ${[tab.info.model, agentDef(tab.agentId)?.name].filter(Boolean).join(' · ')}`;
-  const hidden = tab.agent && !tab.agentVisible ? ' (hidden)' : !tab.agent ? ' (closed)' : '';
+    : agent && `✦ ${[tab.info.model, agentDef(agent.agentId)?.name].filter(Boolean).join(' · ')}${moreAgents > 0 ? `  +${moreAgents}` : ''}`;
   return [
     m.directory && el('div', { className: 'meta dir', textContent: shortPath(tab.cwd), title: tab.cwd }),
     m.git && tab.info.git?.branch && gitLine(tab.info.git),
-    m.model && agentLine && el('div', { className: 'meta model', title: 'Agent and model', textContent: agentLine + hidden }),
+    m.model && agentLine && el('div', { className: 'meta model', title: 'Agent and model', textContent: agentLine }),
   ];
 }
 
@@ -827,6 +1140,9 @@ setInterval(() => {
   }
   const w = tabs.map(t => `${isWorking(t)}${t.done}`).join();
   if (w !== lastWorking) { lastWorking = w; renderTabs(); }
+  // Each agent's own tab icon pulses while that agent works.
+  const now = Date.now();
+  for (const p of tabPanes(active)) p.tabEl?.querySelector('.ptab-icon').classList.toggle('working', p.isAgent && now - p.lastWork < 2000);
 }, 500);
 
 async function refreshInfo(list = tabs) {
@@ -837,9 +1153,9 @@ async function refreshInfo(list = tabs) {
     if (t.type === 'sandbox') t.info.status = sandboxes?.find(s => s.name === t.sandbox.name)?.status;
     if (!(S.tabMetadata.git || S.tabMetadata.model)) return;
     try {
-      const agentId = t.type === 'workspace' ? t.agentId : null;
+      const a = primaryAgent(t);
       const { git, model } = await api.getInfo({
-        cwd: t.cwd, agentCwd: t.agentCwd, agentId, command: agentDef(agentId)?.command, since: t.agentStarted,
+        cwd: t.cwd, agentCwd: a?.cwd, agentId: a?.agentId, command: agentDef(a?.agentId)?.command, since: a?.agentStarted || 0,
       });
       Object.assign(t.info, { git, model });
     } catch { /* keep the last known info */ }
@@ -969,8 +1285,9 @@ function openPalette() {
   paletteItems = [
     ...actions,
     ...S.profiles.map(p => ({ name: `New tab: ${p.name}`, run: () => newTab({ profile: p.name }) })),
+    ...S.profiles.map(p => ({ name: `New terminal pane: ${p.name}`, run: () => addPane(active, { kind: 'shell', profile: p.name }) })),
+    ...S.agents.map(a => ({ name: `New agent pane: ${a.name}`, run: () => addPane(active, { kind: 'agent', agentId: a.id }) })),
     ...S.agents.map(a => ({ name: `Switch agent: ${a.name}`, run: () => switchAgent(a.id) })),
-    ...['right', 'left', 'bottom', 'top'].map(pos => ({ name: `Move agent pane: ${pos}`, run: () => { if (active) { active.position = pos; layoutTab(active); } } })),
     ...S.schemes.map(s => ({ name: `Color scheme: ${s.name}`, run: () => setPaneScheme(s.name) })),
     ...tabs.map(t => ({ name: `Go to tab: ${tabTitle(t)}`, hint: t.type === 'sbx' ? '' : shortPath(t.cwd), run: () => activate(t) })),
   ];
@@ -1059,6 +1376,8 @@ function swatches(name) {
       'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightPurple', 'brightCyan', 'brightWhite']
       .map(k => el('span', { style: `background:${s[k]}`, title: k })));
 }
+const NEW_TAB_LAYOUTS = [['right', 'Agent on the right'], ['left', 'Agent on the left'], ['bottom', 'Agent below'],
+  ['top', 'Agent above'], ['tab', 'Terminal and agent as tabs']];
 const schemeOptions = withDefault => [...(withDefault ? [['', 'Use default']] : []), ...S.schemes.map(s => s.name)];
 function browseButton(onPick) {
   const b = el('button', { textContent: 'Browse…', type: 'button' });
@@ -1093,7 +1412,8 @@ const SECTIONS = {
     field('Starting directory', el('div', { className: 'row' },
       input(S.startingDirectory, v => set('startingDirectory', v)), browseButton(d => set('startingDirectory', d))),
     'Folder for new tabs. Use "Open folder…" (Ctrl+Shift+O) to open a tab somewhere else.'),
-    field('Agent pane position', select(S.agentPanePosition, ['right', 'left', 'bottom', 'top'], v => set('agentPanePosition', v))),
+    field('New tab layout', select(S.agentPanePosition, NEW_TAB_LAYOUTS, v => set('agentPanePosition', v)),
+      'How the terminal and agent are arranged in a new tab. Rearrange any tab by dragging its pane tabs.'),
     field('Agent pane size (%)', input(S.agentPaneSize, v => set('agentPaneSize', clamp(v, 10, 90)), 'number')),
     field('Copy on select', checkbox(S.copyOnSelect, v => set('copyOnSelect', v))),
     field('Drag selects text in apps that use the mouse', checkbox(S.dragToSelect, v => set('dragToSelect', v)),
@@ -1115,6 +1435,16 @@ const SECTIONS = {
     field('Agent and model', checkbox(S.tabMetadata.model, v => set('tabMetadata', { model: v })),
       'Claude Code: read live from its session transcript. Others: from --model in the agent command or the CLI\'s config file.'),
     field('Agent activity indicator', checkbox(S.tabMetadata.activity, v => set('tabMetadata', { activity: v }))),
+  ],
+  Panes: () => [
+    el('p', { className: 'note', textContent: 'Each tab can hold any number of terminals and agents. Drag a pane\'s tab onto the edge of another pane to split, onto its middle or its tab strip to stack it as a tab, onto a tab in the sidebar to move it there, or onto empty sidebar space to give it its own tab.' }),
+    field('New panes open as', select(S.newPanePlacement, [['tab', 'A tab in the same group'], ['right', 'A split to the right'], ['down', 'A split below']], v => set('newPanePlacement', v)),
+      'For the + button on each tab strip and New terminal pane (Ctrl+Shift+E).'),
+    field('Snap preview while dragging', toggle(S.snapPreview, v => set('snapPreview', v)), 'Highlights where the pane will land.'),
+    field('Animate the preview', toggle(S.paneAnimations, v => set('paneAnimations', v))),
+    field('Edge snap area (%)', input(S.snapEdge, v => set('snapEdge', clamp(v, 10, 45)), 'number'),
+      'How far into a pane counts as its edge (splits). Closer to the middle stacks the pane as a tab.'),
+    field('Close buttons on pane tabs', select(S.paneCloseButton, [['always', 'Always'], ['hover', 'Active tab and on hover']], v => set('paneCloseButton', v))),
   ],
   Appearance: () => [
     field('Theme', select(S.theme, ['dark', 'light', 'system'], v => set('theme', v))),
@@ -1221,7 +1551,7 @@ async function runWizard() {
       ]],
       ['Layout and look', 'All of this can be changed later in Settings (Ctrl+,).', () => [
         field('Tabs', select(d.tabLayout, [['vertical', 'Vertical sidebar'], ['horizontal', 'Horizontal, along the top']], v => { d.tabLayout = v; })),
-        field('Agent pane position', select(d.agentPanePosition, ['right', 'left', 'bottom', 'top'], v => { d.agentPanePosition = v; })),
+        field('New tab layout', select(d.agentPanePosition, NEW_TAB_LAYOUTS, v => { d.agentPanePosition = v; })),
         field('Theme', select(d.theme, ['dark', 'light', 'system'], v => { d.theme = v; })),
         field('Color scheme', select(d.colorScheme, schemeOptions(false), v => { d.colorScheme = v; renderStep(); })),
         swatches(d.colorScheme),
@@ -1300,6 +1630,7 @@ function apply(payload) {
   applyTheme();
   $('#app').className = [S.tabLayout === 'horizontal' ? 'horizontal' : 'vertical', !S.sidebarVisible && 'sidebar-hidden'].filter(Boolean).join(' ');
   document.documentElement.style.setProperty('--sidebar-w', `${S.sidebarWidth}px`);
+  document.body.dataset.closeButtons = S.paneCloseButton;
   for (const t of tabs) for (const p of tabPanes(t)) p.applySettings();
   if (active) document.documentElement.style.setProperty('--term-bg', scheme(primaryPane(active).schemeName()).background);
   const agentName = agentDef(S.defaultAgent)?.name;

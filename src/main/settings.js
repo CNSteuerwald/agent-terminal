@@ -42,8 +42,13 @@ const DEFAULTS = {
   sidebarWidth: 260,
   sidebarVisible: true,
   tabMetadata: { directory: true, git: true, model: true, activity: true },
-  agentPanePosition: 'right',
+  agentPanePosition: 'right', // new tab layout: right | left | bottom | top | tab
   agentPaneSize: 50,
+  newPanePlacement: 'tab',     // + button / new pane: tab | right | down
+  snapPreview: true,
+  paneAnimations: true,
+  snapEdge: 30,                // % of a pane counted as its edge when dropping (split vs. stack)
+  paneCloseButton: 'always',   // always | hover
   theme: 'dark',
   colorScheme: 'Campbell',
   // Nerd Fonts first so oh-my-posh/starship prompt glyphs render; missing fonts are skipped.

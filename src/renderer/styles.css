@@ -62,29 +62,53 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 .meta .dirty { color: #d29922; }
 
 /* ---------- panes ---------- */
+/* A tab's view holds a tree of splits (rows/columns) whose leaves are groups: a tab strip + stacked panes. */
 .view { position: absolute; inset: 0; display: none; }
 .view.active { display: flex; }
-.view.pos-right { flex-direction: row; }
-.view.pos-left { flex-direction: row-reverse; }
-.view.pos-bottom { flex-direction: column; }
-.view.pos-top { flex-direction: column-reverse; }
-.pane { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.pane-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 0 2px 0 8px; height: 26px; background: var(--bg); border-bottom: 1px solid var(--border); white-space: nowrap; }
-.pane-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.pane.focused .pane-label { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
-.pane-label button { padding: 1px 6px; font-size: 12px; flex: 0 0 auto; }
-.pane-open { color: var(--accent); border: 1px solid var(--border) !important; }
-.pane-close { font-size: 15px; line-height: 1; opacity: .7; }
-.pane-close:hover { opacity: 1; }
-/* The sbx dashboard fills the whole tab: no header. */
-.view.type-sbx .pane-label { display: none; }
+.view > .split, .view > .group { flex: 1 1 0; }
+.split { display: flex; align-items: stretch; min-width: 0; min-height: 0; }
+.split.split-row { flex-direction: row; }
+.split.split-col { flex-direction: column; }
+.gutter { flex: 0 0 4px; background: var(--border); transition: background .1s; }
+.gutter.gutter-row { cursor: col-resize; }
+.gutter.gutter-col { cursor: row-resize; }
+.gutter:hover, .gutter:active { background: var(--accent); }
+.group { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.group-body { position: relative; flex: 1 1 0; min-height: 0; }
+.group-body > .pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
+/* Stacked panes that aren't showing stay laid out (xterm can still measure) but invisible. */
+.group-body > .pane.inactive { visibility: hidden; pointer-events: none; }
 .term { flex: 1; min-height: 0; padding: 4px 0 0 6px; }
-.divider { flex: 0 0 4px; background: var(--border); }
-.view.pos-right > .divider, .view.pos-left > .divider { cursor: col-resize; }
-.view.pos-top > .divider, .view.pos-bottom > .divider { cursor: row-resize; }
-.divider:hover { background: var(--accent); }
-.view.zoom-shell > .pane-agent, .view.zoom-agent > .pane-shell, .view[class*="zoom-"] > .divider { display: none; }
-.view.zoom-agent > .pane-agent { flex: 1 1 0 !important; }
+
+/* Pane tabs: browser-style tabs whose active tab merges into the terminal below it. */
+.pane-strip { display: flex; align-items: flex-end; gap: 2px; height: 32px; padding: 4px 4px 0 6px; background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex: 0 0 auto; }
+.ptab { position: relative; display: flex; align-items: center; gap: 6px; height: 27px; min-width: 70px; max-width: 230px; flex: 0 1 auto; padding: 0 4px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; color: var(--muted); font-size: 12px; user-select: none; cursor: default; }
+.ptab:hover { background: var(--hover); color: var(--fg); }
+.ptab.active { background: var(--term-bg); border-color: var(--border); color: var(--fg); height: 28px; margin-bottom: -1px; }
+.group.focused .ptab.active { box-shadow: inset 0 2px 0 var(--accent); }
+.ptab-icon { font: 11px/1 ui-monospace, Consolas, monospace; opacity: .75; flex: 0 0 auto; }
+.ptab-icon.working { color: var(--accent); opacity: 1; animation: pulse 1s ease-in-out infinite; }
+.ptab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ptab-input { width: 130px; font: inherit; padding: 1px 4px; }
+.ptab-close { flex: 0 0 auto; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-left: -2px; border-radius: 4px; font-size: 14px; line-height: 1; opacity: .55; }
+.ptab-close:hover { opacity: 1; background: var(--hover); }
+body[data-close-buttons="hover"] .ptab:not(:hover):not(.active) .ptab-close { visibility: hidden; }
+.ptab.drag-source { opacity: .45; }
+.strip-add { position: sticky; right: 0; margin-left: auto; align-self: center; flex: 0 0 auto; width: 26px; height: 24px; padding: 0; border-radius: 6px; font-size: 17px; line-height: 1; color: var(--muted); background: var(--bg); }
+.strip-add:hover { color: var(--fg); }
+/* The sbx dashboard fills the whole tab: no tab strip. */
+.view.type-sbx .pane-strip { display: none; }
+
+/* Drag and drop: a Windows-snap-style highlight of where the pane will land. */
+#snap-overlay { position: fixed; z-index: 25; pointer-events: none; display: grid; place-items: center; border: 2px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 8px 30px #0005, inset 0 0 0 1px #fff1; }
+#snap-overlay.animate { transition: left .14s ease, top .14s ease, width .14s ease, height .14s ease; }
+#snap-overlay span { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg2); color: var(--fg); font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px #0004; }
+#snap-marker { position: fixed; z-index: 26; width: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 27; pointer-events: none; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg2); color: var(--fg); font-size: 12px; box-shadow: 0 6px 18px #0006; white-space: nowrap; }
+body.dragging-pane, body.dragging-pane * { cursor: grabbing !important; }
+.menu-seg { display: flex; gap: 2px; padding: 2px 8px 6px; }
+.popup .menu-seg button { display: block; width: auto; flex: 1; white-space: nowrap; padding: 3px 8px; font-size: 12px; text-align: center; border: 1px solid var(--border); }
+.popup .menu-seg button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 /* ---------- popups ---------- */
 .popup { position: fixed; z-index: 20; min-width: 220px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px #0006; }
