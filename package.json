@@ -1,6 +1,6 @@
 {
   "name": "agent-terminal",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A terminal for running agent CLIs (Claude Code, Copilot, Codex, Gemini, OpenCode) side by side with a shell, one folder per tab.",
   "main": "src/main/main.js",
   "private": true,
