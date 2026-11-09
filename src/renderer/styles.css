@@ -19,8 +19,14 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 
 /* ---------- layout ---------- */
 #app { display: grid; height: 100%; }
-#app.vertical { grid-template-columns: var(--sidebar-w) 4px 1fr; }
-#app.horizontal { grid-template-rows: auto 1fr; }
+#app.vertical { grid-template-columns: var(--sidebar-w) 4px 1fr; grid-template-rows: 1fr auto; }
+#app.horizontal { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+/* Explicit placement: hiding the sidebar must not shift the terminals or the bottom bar into its column. */
+#app.vertical #tabbar { grid-area: 1 / 1; }
+#app.vertical #sidebar-resizer { grid-area: 1 / 2; }
+#app.vertical #views { grid-area: 1 / 3; }
+#app.horizontal #tabbar { grid-area: 1 / 1; }
+#app.horizontal #views { grid-area: 2 / 1; }
 #app.horizontal #sidebar-resizer, #app.sidebar-hidden #sidebar-resizer { display: none; }
 #app.vertical.sidebar-hidden { grid-template-columns: 0 0 1fr; }
 #app.sidebar-hidden #tabbar { display: none; }
@@ -30,9 +36,8 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 #tabs { display: flex; gap: 2px; padding: 6px; overflow: auto; min-width: 0; }
 #app.vertical #tabs { flex-direction: column; flex: 1; }
 #app.horizontal #tabs { flex-direction: row; }
-#tabbar-actions { display: flex; align-items: center; padding: 4px 6px; gap: 2px; }
-#app.vertical #tabbar-actions { border-top: 1px solid var(--border); }
-#app.horizontal #tabbar-actions .spacer { display: none; }
+/* Bottom bar across the whole window: new-tab buttons on the left, settings on the right. */
+#tabbar-actions { grid-column: 1 / -1; grid-row: -2; display: flex; align-items: center; padding: 4px 6px; gap: 2px; background: var(--bg); border-top: 1px solid var(--border); }
 .spacer { flex: 1; }
 #sidebar-resizer { cursor: col-resize; background: transparent; }
 #sidebar-resizer:hover { background: var(--accent); }
