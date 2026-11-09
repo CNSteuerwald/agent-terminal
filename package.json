@@ -28,10 +28,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/omnitech/agent-terminal.git"
+    "url": "https://github.com/CNSteuerwald/agent-terminal.git"
   },
   "build": {
-    "appId": "com.omnitech.agentterminal",
+    "appId": "com.cnsteuerwald.agentterminal",
     "productName": "Agent Terminal",
     "artifactName": "Agent-Terminal-Setup-${version}.${ext}",
     "files": [
@@ -54,7 +54,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "omnitech",
+        "owner": "CNSteuerwald",
         "repo": "agent-terminal",
         "private": true,
         "releaseType": "release"

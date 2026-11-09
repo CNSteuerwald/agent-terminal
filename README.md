@@ -13,8 +13,8 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 
 ## Install (for the team)
 
-1. Make sure you can see [omnitech/agent-terminal](https://github.com/omnitech/agent-terminal) (it's private; ask to be added).
-2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/omnitech/agent-terminal/releases/latest) and run it. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
+1. Make sure you can see [CNSteuerwald/agent-terminal](https://github.com/CNSteuerwald/agent-terminal) (it's private; ask to be added as a collaborator).
+2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
 3. Windows may show **"Windows protected your PC"** because the installer isn't code-signed yet. Click **More info → Run anyway**.
 
 ### Updating
