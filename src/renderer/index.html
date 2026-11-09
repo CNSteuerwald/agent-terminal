@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:">
+  <title>Agent Terminal</title>
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="vertical">
+    <nav id="tabbar" aria-label="Tabs">
+      <div id="tabs" role="tablist"></div>
+      <div id="tabbar-actions">
+        <button id="new-agent-tab" class="new-btn">+ Agent</button>
+        <button id="new-shell-tab" class="new-btn" title="New tab with only a terminal (Ctrl+Alt+T). Open the agent later from the pane header.">+ Terminal</button>
+        <button id="new-tab-menu" title="New tab with…" aria-label="New tab with profile or agent">▾</button>
+        <span class="spacer"></span>
+        <button id="settings-btn" title="Settings (Ctrl+,)" aria-label="Settings">⚙</button>
+      </div>
+    </nav>
+    <div id="sidebar-resizer" role="separator" aria-label="Resize sidebar"></div>
+    <main id="views"></main>
+  </div>
+
+  <div id="menu" class="popup" role="menu" hidden></div>
+
+  <div id="findbar" hidden>
+    <input id="find-input" placeholder="Find" aria-label="Find in terminal">
+    <button id="find-prev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button>
+    <button id="find-next" title="Next (Enter)" aria-label="Next match">↓</button>
+    <button id="find-close" title="Close (Esc)" aria-label="Close find">×</button>
+  </div>
+
+  <div id="palette" class="overlay" hidden>
+    <div class="palette-box" role="dialog" aria-label="Command palette">
+      <input id="palette-input" placeholder="Type a command…" aria-label="Command">
+      <ul id="palette-list" role="listbox"></ul>
+    </div>
+  </div>
+
+  <div id="settings" class="overlay" hidden>
+    <div class="settings-box" role="dialog" aria-label="Settings">
+      <nav id="settings-nav"></nav>
+      <section id="settings-body"></section>
+      <button id="settings-close" title="Close (Esc)" aria-label="Close settings">×</button>
+    </div>
+  </div>
+
+  <div id="wizard" class="overlay" hidden>
+    <div id="wizard-box" role="dialog" aria-label="Setup"></div>
+  </div>
+
+  <div id="toast" role="status" hidden></div>
+
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+  <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="keys.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

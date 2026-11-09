@@ -1,0 +1,25 @@
+{
+  "name": "agent-terminal",
+  "version": "0.1.0",
+  "description": "A terminal for running agent CLIs (Claude Code, Copilot, Codex, Gemini, OpenCode) side by side with a shell, one folder per tab.",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  },
+  "allowScripts": {
+    "electron@45.2.3": true
+  }
+}

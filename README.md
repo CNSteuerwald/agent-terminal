@@ -1,0 +1,246 @@
+# Agent Terminal
+
+A desktop terminal for working with coding agents. Every tab is one folder, split in two:
+
+- a **shell pane** (PowerShell, cmd, Git Bash, WSL, bash, zsh, ...) in that folder, and
+- an **agent pane** running your agent CLI (Claude Code, GitHub Copilot CLI, Codex, Gemini CLI, OpenCode, or any command you add) in the same folder, **exactly as it looks in a normal terminal**. No chat overlay or wrapper: you get the CLI's own interface.
+
+Tabs live in a vertical sidebar (or a horizontal strip) that shows each tab's folder, git branch and status, and the model its agent is using.
+
+Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intelligent-terminal). It keeps that app's sidebar tabs, default profile, split agent pane, color schemes and the applicable actions and key bindings. It drops the ACP chat overlay in favor of the raw CLI.
+
+---
+
+## Run it locally
+
+### Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| [Node.js](https://nodejs.org/) 20 or newer | Includes npm. Check with `node --version`. |
+| [Git](https://git-scm.com/) | Used for the git branch/status shown in tabs. |
+| At least one agent CLI on your `PATH` | e.g. `claude` ([Claude Code](https://docs.claude.com/en/docs/claude-code)), `copilot`, `codex`, `gemini`, `opencode`. Check with `claude --version`. |
+| Windows 10 1809+ / macOS / Linux | Developed and tested on Windows 11. |
+
+### Install and start
+
+```powershell
+cd C:\Dev\agent-terminal
+npm install
+npm start
+```
+
+To open a specific folder as the first tab:
+
+```powershell
+npm start -- C:\path\to\your\repo
+```
+
+On first launch a short **setup wizard** asks for your default agent (it shows which CLIs it found on your `PATH`), default shell, starting folder, layout and colors, and whether to turn on **Docker Sandboxes** support. You can skip it, and you can run it again any time from **Settings → General** or the command palette (*Run setup wizard*).
+
+After setup, the first tab opens in your starting directory with your default shell on one side and your agent on the other.
+
+> **If `npm start` says Electron failed to install:** recent npm versions only run install scripts for packages listed under `allowScripts` in `package.json`. Electron is already listed there. If the download was still skipped, run `node node_modules/electron/install.js` once.
+>
+> **Linux only:** `node-pty` ships prebuilt binaries for Windows and macOS, but on Linux it compiles from source. Install build tools (`build-essential`, `python3`), then run `npm approve-scripts node-pty && npm rebuild node-pty`.
+
+### Run the tests
+
+```powershell
+npm test
+```
+
+---
+
+## Using it
+
+### Tabs and the sidebar
+
+- **+ Claude Code** (`Ctrl+Shift+T`) opens a tab with your default agent and a terminal, in the starting directory. The button is named after your default agent.
+- **+ Terminal** (`Ctrl+Alt+T`) opens a tab with just a terminal. `cd` wherever you want, then click **+ Claude Code** in the pane header, and the agent starts in the folder your shell is in.
+- **Open folder…** (`Ctrl+Shift+O`) picks a folder and opens a tab there.
+- The **▾** button opens a tab with a specific shell or a specific agent.
+- **Tabs follow your shell.** The directory and git status update as you `cd`. PowerShell, cmd and Git Bash are set up for this automatically (they report the folder at each prompt). Other shells work if they emit the standard OSC 7 / OSC 9;9 sequences.
+- **Tabs reopen on launch.** Your tabs, folders, titles, split layout and window size are saved as you go, and restored the next time you start the app. Processes can't survive closing, so each pane restarts. Claude Code, Copilot and OpenCode are started with `--continue` to resume their last conversation in that folder, and start fresh if there isn't one. Turn this off in **Settings → General → Reopen tabs on launch**.
+- Each tab shows (toggle each in **Settings → Tabs**):
+  - **Directory**: the tab's folder
+  - **Git**: branch, ↑ahead / ↓behind, and number of changed files (✓ when clean)
+  - **Agent and model**: e.g. `✦ claude-opus-5-5 · Claude Code`
+  - **Activity dot**:
+    - **Blue, pulsing:** the agent is working.
+    - **Green:** the agent finished while you were on another tab.
+    - **Amber:** it rang the bell (needs attention).
+    - Output caused by your own typing, resizing or switching tabs doesn't count, and nothing counts until you've typed something to that agent.
+- Double-click a tab title to rename it. Middle-click closes it. Drag tabs to reorder.
+- **Right-click a tab** to color it, rename it or close it. Choose a swatch or a custom color. The focused tab gets a soft tint of its color, and other tabs show just a colored edge. Colors are saved with your tabs.
+- Switch between a **vertical** sidebar and **horizontal** tabs in **Settings → Tabs**, or with the *Toggle vertical / horizontal tabs* command. Drag the sidebar edge to resize it. `Ctrl+Shift+S` hides it.
+
+### The split
+
+- Each pane has a header with its name and a **×** that closes it (stopping its process), just like a tab. `Ctrl+Shift+W` closes the focused pane.
+- When one pane is closed, the remaining pane's header shows a **+** button (e.g. **+ Claude Code** or **+ PowerShell**) that opens it again. When both panes are closed, the tab closes.
+- `Ctrl+Shift+I` switches focus between the shell and the agent.
+- `Ctrl+Shift+.` hides or shows the agent pane. Unlike closing, the agent keeps running while hidden.
+- **Ctrl+scroll** over a terminal makes the text bigger or smaller (same as `Ctrl+=` / `Ctrl+-`, with `Ctrl+0` to reset).
+- Drag the divider, or use `Alt+Shift+Arrow`, to resize.
+- Agent pane position (right/left/bottom/top) is a setting. You can also change it per tab from the command palette (*Move agent pane: …*).
+- When a process exits, press **Enter** in its pane to restart it.
+- In the agent pane, `Shift+Enter` sends a newline (Meta+Enter) instead of submitting, which Claude Code and most agent TUIs understand.
+
+### Docker Sandboxes (sbx)
+
+Turn this on in the setup wizard or **Settings → Sandboxes**. It needs [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) installed, with `sbx` on your `PATH`.
+
+- A tab titled **sbx** is pinned first in the tab list, styled in Docker blue so it stands apart from your workspace tabs. It runs the `sbx` dashboard (TUI) filling the whole tab, and the sidebar shows how many sandboxes are running.
+- When you open a sandbox from that dashboard (**Enter**, then **External terminal**), it opens **here as a new tab** named after the sandbox. The tab holds the sandbox session plus a host shell in the sandbox's workspace folder, with git status in the sidebar. Opening a sandbox that already has a tab switches to that tab.
+- If you choose **In this terminal** in the dashboard instead, the session runs inside the sbx tab, which is normal sbx behavior.
+- Closing the sbx tab is fine. Reopen it with *Open Docker Sandboxes (sbx) tab* from the palette or the **▾** menu.
+
+**How it works (Windows):** when the sbx dashboard sees `WT_SESSION`, it opens sandboxes with `wt.exe -w new nt -- sbx … run --name <sandbox>`. Inside the sbx tab only, Agent Terminal puts its own small `wt.exe` first on `PATH` ([`src/shim/wt.cs`](src/shim/wt.cs)). That `wt.exe` sends the request to the app over a local named pipe, protected by a per-launch random token, and the app opens the tab. It only ever runs `sbx` with the arguments sbx asked for. The `wt.exe` is compiled on first use with the C# compiler built into Windows (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) and cached in the app's data folder. On macOS/Linux the sbx tab works, but sandboxes still open in sbx's own choice of external terminal.
+
+### Copy and paste
+
+- **Select** by dragging, in both the shell and the agent pane. Claude Code and other full-screen CLIs capture the mouse, and in those panes a drag still selects text while a plain click goes to the app, so Claude's clickable buttons keep working. To send drags to the app instead, turn off **Settings → General → Drag selects text in apps that use the mouse**. Then hold Shift to select.
+- **Copy** with `Ctrl+C` while text is selected (without a selection `Ctrl+C` still interrupts), `Ctrl+Shift+C`, or **right-click**. A short "Copied N characters" notice confirms it.
+- **Paste** with `Ctrl+V`, `Ctrl+Shift+V`, or right-click when nothing is selected.
+- CLIs can also copy to your clipboard themselves using OSC 52 (Claude Code, tmux, Neovim). Reading your clipboard that way is blocked.
+
+### How the model name is found
+
+| Agent | Source |
+|---|---|
+| Claude Code | Live: the newest session transcript in `~/.claude/projects/<folder>/`, so it follows `/model` switches. Falls back to `--model` in the agent command, then `model` in `.claude/settings.local.json`, `.claude/settings.json`, `~/.claude/settings.json`. |
+| Codex | `--model`/`-m` in the command, else `model` in `~/.codex/config.toml` |
+| Gemini CLI | `--model`/`-m`, else `model.name` in `~/.gemini/settings.json` |
+| Copilot CLI | `--model`, else `model` in `~/.copilot/config.json` |
+| OpenCode | `--model`/`-m`, else `model` in `opencode.json` (project) or `~/.config/opencode/opencode.json` |
+
+If nothing is found, only the agent name is shown. That usually means the CLI is on its own default model.
+
+### Default keyboard shortcuts
+
+All of these can be rebound in **Settings → Actions** (click the field and press the new keys), or in `settings.json`.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+T` | New tab: agent + terminal |
+| `Ctrl+Alt+T` | New tab: terminal only |
+| `Ctrl+Shift+O` | Open folder in new tab |
+| `Ctrl+Shift+D` | Duplicate tab |
+| `Ctrl+Shift+W` | Close focused pane (the tab closes when no panes are left) |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+Alt+1`…`8`, `Ctrl+Alt+9` | Switch to tab N / last tab |
+| `Ctrl+Shift+S` | Toggle tab sidebar |
+| `Ctrl+Shift+.` | Toggle agent pane |
+| `Ctrl+Shift+I` | Switch focus between shell and agent |
+| `Alt+Shift+Arrows` | Move the split |
+| `Ctrl+Shift+P` | Command palette (all actions, color schemes, switch agent, go to tab) |
+| `Ctrl+,` | Settings |
+| `Ctrl+Shift+,` | Open `settings.json` |
+| `Ctrl+Alt+,` | Open the full effective settings (read-only reference) |
+| `Ctrl+Shift+C`, `Ctrl+C` with a selection | Copy |
+| `Ctrl+Shift+V`, `Ctrl+V` | Paste (if the clipboard has no text, e.g. an image, the key goes to the CLI) |
+| `Ctrl+Shift+A` | Select all |
+| `Ctrl+Shift+F` | Find |
+| `Ctrl+Shift+Up/Down/PgUp/PgDn/Home/End` | Scroll |
+| `Ctrl+Shift+K` | Clear buffer |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0`, Ctrl+scroll | Font size bigger / smaller / reset |
+| `Ctrl+Shift+N` | New window |
+| `F11`, `Alt+Enter` | Toggle fullscreen |
+| `Shift+Enter` (agent pane) | Newline instead of submit |
+| `Ctrl+Shift+F12` | Developer tools |
+
+Unbound by default (available in the palette): close tab, rename tab, move tab forward/backward, open shell pane, open agent pane, restart agent, restart shell, toggle split orientation, zoom pane, open the sbx tab, run setup wizard, open tab folder in file explorer, toggle always on top, toggle tab layout.
+
+---
+
+## Settings
+
+Use the **Settings** screen (`Ctrl+,`) for everyday options. Everything lives in one JSON file, which you can also edit by hand. Changes apply immediately.
+
+| OS | Location |
+|---|---|
+| Windows | `%APPDATA%\agent-terminal\settings.json` |
+| macOS | `~/Library/Application Support/agent-terminal/settings.json` |
+| Linux | `~/.config/agent-terminal/settings.json` |
+
+The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`) to see every key with its current value.
+
+```jsonc
+{
+  "setupComplete": true,                   // false (or missing) shows the setup wizard on next launch
+  "sandboxEnabled": false,                 // Docker Sandboxes: pinned "sbx" tab
+  "sandboxCommand": "sbx",                 // name or full path of sbx
+  "defaultProfile": "PowerShell",          // shell for new tabs (a profile name)
+  "defaultAgent": "claude",                // agent id for new tabs, "" for none
+  "startingDirectory": "~",
+  "tabLayout": "vertical",                 // "vertical" | "horizontal"
+  "sidebarWidth": 260,
+  "tabMetadata": { "directory": true, "git": true, "model": true, "activity": true },
+  "agentPanePosition": "right",            // "right" | "left" | "bottom" | "top"
+  "agentPaneSize": 50,                     // percent
+  "theme": "dark",                         // "dark" | "light" | "system"
+  "colorScheme": "Campbell",
+  "fontFace": "'Cascadia Mono NF', 'Cascadia Mono', Consolas, monospace",
+  "fontSize": 14,
+  "cursorShape": "bar",                    // "bar" | "block" | "underline"
+  "copyOnSelect": false,
+  "confirmOnClose": true,                  // ask before closing a window with several tabs ("Don't ask me again" sets false)
+  "restoreSession": true,                  // reopen tabs on launch
+
+  // Agents merge with the built-ins by id. Add your own or change a command.
+  "agents": [
+    { "id": "claude", "command": "claude --model opus", "colorScheme": "One Half Dark" },
+    { "id": "aider", "name": "Aider", "command": "aider --no-auto-commits" }
+  ],
+
+  // Shell profiles merge with the detected ones by name. "hidden": true removes one.
+  "profiles": [
+    { "name": "Ubuntu", "commandline": "wsl.exe", "args": ["-d", "Ubuntu"] },
+    { "name": "Command Prompt", "hidden": true }
+  ],
+
+  // Extra color schemes, in Windows Terminal's format (paste them straight from WT).
+  "schemes": [],
+
+  // Action id -> key combo (or a list of combos). "" unbinds.
+  "keybindings": { "toggleAgentPane": "ctrl+alt+a", "copy": ["ctrl+shift+c", "ctrl+insert"] }
+}
+```
+
+*(Comments are for illustration. The real file must be plain JSON.)*
+
+**Color schemes.** These are the same built-in schemes as Intelligent Terminal and Windows Terminal: Campbell, Campbell Powershell, Dimidium, Ottosson, Vintage, One Half Dark/Light, Solarized Dark/Light, Tango Dark/Light, Dark+, VSCode Dark/Light Modern, CGA and IBM 5153. Set a default, override it per shell profile or per agent, or switch the focused pane from the palette (*Color scheme: …*).
+
+**Agent commands** run through your platform shell (`cmd /c` on Windows, `$SHELL -lc` elsewhere). npm shims such as `copilot.cmd` work, and anything you can type at a prompt works too.
+
+---
+
+## Project layout
+
+```
+src/
+  main/main.js       Electron main process: windows, PTYs (node-pty), IPC, settings file watch
+  main/settings.js   Defaults, shell detection, settings merge/patch, launch commands
+  main/info.js       Git status and agent-model detection for the sidebar
+  main/sandbox.js    Docker Sandboxes: sbx lookup, wt.exe stand-in build, named-pipe listener
+  shim/wt.cs         The wt.exe stand-in used inside the sbx tab (Windows)
+  preload.js         The small, explicit API the UI may call (context-isolated, sandboxed)
+  renderer/          UI: index.html, styles.css, app.js (tabs, panes, actions, settings, palette), keys.js
+  shared/schemes.json  Built-in color schemes
+test/                Node test runner tests for the pure logic
+```
+
+The UI is plain JavaScript with [xterm.js](https://xtermjs.org/), with no framework and no build step. Edit a file and restart with `npm start`.
+
+## Troubleshooting
+
+- **Prompt shows boxes instead of icons:** your prompt (oh-my-posh, starship) needs a Nerd Font. Install one and set `fontFace` to it, e.g. `"'CaskaydiaCove Nerd Font Mono'"`.
+- **`'claude' is not recognized`** in the agent pane: the CLI isn't on the `PATH` the app was started with. Check `claude --version` in a new terminal, then restart Agent Terminal.
+- **Started from inside another Claude Code session:** child processes inherit that session's environment variables, and Claude Code may warn about it. Start Agent Terminal from a regular terminal, Explorer or a shortcut.
+- **Sandboxes from the sbx tab open in Windows Terminal instead of here:** the `wt.exe` stand-in couldn't be built (no `csc.exe`). Check that `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe` exists. Until then, choose **In this terminal** in the sbx dialog.
+- **Settings file has a syntax error:** a message appears at the bottom of the window and the app keeps the defaults until the file parses again.
+
+## Not included (yet)
+
+Arbitrary pane splitting beyond shell+agent, keeping processes alive across restarts (tabs reopen and agents resume, but processes restart), packaged installers, and the original's ACP chat, error auto-fix and session-management features. The agent's own CLI covers most of those.
