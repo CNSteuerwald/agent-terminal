@@ -14,7 +14,7 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 ## Install (for the team)
 
 1. Make sure you can see [CNSteuerwald/agent-terminal](https://github.com/CNSteuerwald/agent-terminal) (it's private; ask to be added as a collaborator).
-2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
+2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. That's the only file you need. The release's other two files are for auto-update. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
 3. Windows may show **"Windows protected your PC"** because the installer isn't code-signed yet. Click **More info → Run anyway**.
 
 ### Updating
@@ -35,7 +35,17 @@ While the repo is private, update checks use your GitHub CLI login. Run `gh auth
    - **current:** release the version already in `package.json` without bumping it, for example the very first release
 3. Click **Run workflow**.
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) then runs the tests and bumps the version in `package.json` with a `Release vX.Y.Z` commit on `master` and a tag. It builds the Windows installer and publishes a GitHub Release with it. Installed copies pick it up automatically. Run `git pull` afterwards to get the version commit locally.
+[`.github/workflows/release.yml`](.github/workflows/release.yml) then runs the tests and bumps the version in `package.json` with a `Release vX.Y.Z` commit on `master` and a tag. It creates the GitHub Release as a draft with auto-generated notes, builds the installer and uploads it, then publishes the release. Installed copies pick it up automatically. Run `git pull` afterwards to get the version commit locally.
+
+Each release has three files, and auto-update needs all of them:
+
+| File | What it's for |
+|---|---|
+| `Agent-Terminal-Setup-<version>.exe` | The installer. Teammates download this, and the updater installs it. |
+| `latest.yml` | Tells installed copies which version is newest and where its installer is. Without it, updates stop. |
+| `Agent-Terminal-Setup-<version>.exe.blockmap` | Lets the updater download only the parts that changed since your installed version, instead of the whole ~125 MB installer. Without it, updates fall back to the full download. |
+
+Don't delete or rename these files on a published release.
 
 **From the command line,** if you prefer:
 
@@ -47,7 +57,7 @@ git push --follow-tags
 
 Pushing the tag runs the same workflow, which fails if the tag doesn't match `package.json`'s version.
 
-To build an installer locally without publishing, run `npm run dist`. The output goes to `dist\Agent-Terminal-Setup-<version>.exe`.
+To build an installer locally without publishing, run `npm run dist`. It writes the same three files to `dist\`. Only the `.exe` matters for a local install.
 
 > **Going public later:** make the repo public, remove `"private": true` from `build.publish` in `package.json`, and delete the `gh auth token` shortcut in `src/main/updater.js`. Updates then work for everyone with no GitHub login.
 
