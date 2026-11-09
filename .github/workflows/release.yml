@@ -65,6 +65,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Browsers and Windows often block a bare unsigned .exe download; teammates download this zip.
+      # The .exe, .blockmap and latest.yml must stay as separate assets: electron-updater fetches them by name.
+      - name: Zip the installer for manual downloads
+        shell: bash
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          (cd dist && 7z a -tzip "Agent-Terminal-Setup-$v.zip" "Agent-Terminal-Setup-$v.exe")
+          gh release upload "v$v" "dist/Agent-Terminal-Setup-$v.zip"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish the release
         shell: bash
         run: gh release edit "v$(node -p "require('./package.json').version")" --draft=false --latest
