@@ -1025,6 +1025,18 @@ async function restoreSession(s) {
   const target = await created[s.active];
   activate(target || tabs.find(t => t.type !== 'sbx') || tabs[0]);
   await Promise.all(created);
+  await active?.starting;
+}
+
+// Starts the terminals of tabs not shown yet, one tab per frame so the window stays responsive.
+async function startBackgroundTabs() {
+  for (const t of [...tabs]) {
+    if (t === active || !tabs.includes(t)) continue;
+    t.view.classList.add('active'); // xterm must measure its cell size while visible; removed before the next paint
+    startPanes(t);
+    t.view.classList.toggle('active', t === active);
+    await new Promise(requestAnimationFrame);
+  }
 }
 
 // ---------------------------------------------------------------- tab list
@@ -1693,4 +1705,7 @@ function apply(payload) {
     await newTab(dir ? { cwd: dir } : {});
   }
   started = true;
+  // Current tab first, then the update check, then the remaining tabs.
+  await api.checkForUpdates();
+  startBackgroundTabs();
 })();

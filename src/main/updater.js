@@ -23,14 +23,20 @@ function setStatus(next) {
 }
 
 // beforeInstall: called right before quitting to install (lets main skip the "close N tabs?" prompt).
-async function start({ beforeInstall }) {
+// The first check waits until a window asks (update:check), once its current tab is running; the
+// returned promise settles when that check is done, so the window can then start its other tabs.
+function start({ beforeInstall }) {
+  let firstCheck = null;
+  ipcMain.handle('update:check', () => (firstCheck ||= run().catch(() => {})));
   ipcMain.handle('update:get', () => status);
   ipcMain.on('update:install', () => {
     if (status?.state !== 'ready') return;
     beforeInstall();
     autoUpdater.quitAndInstall(true, true); // silent install, then relaunch
   });
+}
 
+async function run() {
   if (!app.isPackaged) return; // `npm start` runs from source; nothing to update
   ({ autoUpdater } = require('electron-updater'));
   process.env.GH_TOKEN ||= await ghToken();
@@ -47,9 +53,10 @@ async function start({ beforeInstall }) {
     console.error('update failed:', err?.message || err);
     if (status?.state === 'downloading') setStatus(null); // don't leave a stuck progress message
   });
-  const check = () => { if (status?.state !== 'ready') autoUpdater.checkForUpdates().catch(() => {}); };
-  check();
+  // Settles once the check is done; a found update keeps downloading in the background.
+  const check = () => (status?.state === 'ready' ? null : autoUpdater.checkForUpdates().catch(() => {}));
   setInterval(check, CHECK_EVERY_MS);
+  await check();
 }
 
 module.exports = { start };

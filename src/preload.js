@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   getUpdateStatus: () => ipcRenderer.invoke('update:get'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
   onUpdateStatus: cb => ipcRenderer.on('update:status', (_e, s) => cb(s)),
   installUpdate: () => ipcRenderer.send('update:install'),
   uninstall: () => ipcRenderer.invoke('app:uninstall'),
