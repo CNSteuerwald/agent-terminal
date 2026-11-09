@@ -218,3 +218,10 @@ button:disabled { opacity: .45; cursor: default; }
 .menu-custom:hover { background: var(--hover); }
 .menu-custom input[type="color"] { width: 28px; height: 22px; padding: 0; border: 1px solid var(--border); background: none; cursor: pointer; }
 #toast.info { border-color: var(--accent); }
+
+/* ---------- update notice (bottom bar) + uninstall ---------- */
+#update-status { color: var(--muted); font-size: 12px; margin-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#update-status .update-restart { color: var(--accent); padding: 0 2px; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+#update-status .update-restart:hover { background: none; filter: brightness(1.2); }
+button.danger { border: 1px solid var(--danger); color: var(--danger); padding: 6px 14px; justify-self: start; }
+button.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }

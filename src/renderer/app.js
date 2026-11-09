@@ -11,6 +11,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 let S = null;            // effective settings from main
 let HOME = '';
+let PACKAGED = false;    // installed copy (vs npm start): enables Uninstall
 let keymap = new Map();  // normalized combo -> action id
 const tabs = [];
 let active = null;
@@ -1424,6 +1425,11 @@ const SECTIONS = {
       'Reopens your tabs, folders and split layout. Claude Code, Copilot and OpenCode resume their last conversation (--continue).'),
     field('Setup wizard', Object.assign(el('button', { textContent: 'Run setup again', type: 'button', className: 'secondary' }),
       { onclick: e => { e.preventDefault(); closeSettings(); runWizard(); } })),
+    field('Uninstall', Object.assign(el('button', { textContent: 'Uninstall Agent Terminal…', type: 'button', className: 'danger', disabled: !PACKAGED }),
+      { onclick: e => { e.preventDefault(); api.uninstall(); } }),
+    PACKAGED
+      ? 'Removes the app, its shortcuts and its Apps & features entry. You can also delete your settings and saved tabs. Your projects and agent CLIs are not touched.'
+      : 'Only for installed copies. You\'re running from source (npm start).'),
   ],
   Tabs: () => [
     field('Tab layout', select(S.tabLayout, [['vertical', 'Vertical (sidebar)'], ['horizontal', 'Horizontal (top)']], v => set('tabLayout', v))),
@@ -1622,9 +1628,26 @@ function syncSbxTab() {
   if (!S.sandboxEnabled && sbxTab && tabs.length > 1) closeTab(sbxTab);
 }
 
+// Update notice in the bottom bar (no dialogs), in the spirit of Claude Code's status-line notice.
+function renderUpdateStatus(s) {
+  const box = $('#update-status');
+  box.hidden = !s;
+  if (!s) return box.replaceChildren();
+  if (s.state === 'downloading') {
+    box.replaceChildren(`↓ Downloading update ${s.version}… ${s.percent || 0}%`);
+    box.title = 'Downloading in the background. You can keep working.';
+    return;
+  }
+  const restart = el('button', { className: 'update-restart', textContent: 'Restart now', title: 'Install the update and reopen. Your tabs come back.' });
+  restart.onclick = () => api.installUpdate();
+  box.replaceChildren(`✓ Update ${s.version} ready · installs when you quit · `, restart);
+  box.title = '';
+}
+
 function apply(payload) {
   S = payload.settings;
   HOME = payload.home;
+  PACKAGED = payload.packaged;
   if (payload.error) toast(payload.error);
   buildKeymap();
   applyTheme();
@@ -1647,6 +1670,8 @@ function apply(payload) {
   apply(await api.getSettings());
   api.onSettings(apply);
   api.onSbxOpen(openSandboxTab);
+  api.onUpdateStatus(renderUpdateStatus);
+  renderUpdateStatus(await api.getUpdateStatus());
   if (!S.setupComplete) await runWizard();
   sandboxWasEnabled = S.sandboxEnabled;
   const dir = new URLSearchParams(location.search).get('dir');

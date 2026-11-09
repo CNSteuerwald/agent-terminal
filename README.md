@@ -19,9 +19,13 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 
 ### Updating
 
-The app checks for new releases on launch and every 4 hours. It downloads them in the background, then offers **Restart now** (your tabs reopen) or installs the next time you quit.
+The app checks for new releases on launch and every 4 hours, and downloads them in the background. There are no pop-ups: the right end of the bottom bar shows `↓ Downloading update…`, then `✓ Update x.y.z ready · installs when you quit · Restart now`. Either keep working, and the update installs silently when you quit so the next launch is up to date, or click **Restart now** to install it immediately. Your tabs reopen either way.
 
 While the repo is private, update checks use your GitHub CLI login. Run `gh auth login` once with the account that can see the repo. Without it, updates are manual: download and run the newest installer from Releases, and your settings and tabs are kept.
+
+### Uninstalling
+
+Go to **Settings → General → Uninstall Agent Terminal…**. Leave **Also delete my settings, saved tabs and downloaded updates** ticked to remove everything: the app, its shortcuts, its *Apps & features* entry, `%APPDATA%\agent-terminal` and `%LOCALAPPDATA%\agent-terminal-updater`. Your projects, agent CLIs and Docker sandboxes are not touched. Uninstalling from Windows' *Apps & features* also works, but it keeps your settings.
 
 ## Releasing a new version (maintainers)
 
