@@ -6,7 +6,9 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
   },
   "license": "MIT",
   "dependencies": {
@@ -14,12 +16,49 @@
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.11",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
-    "electron": "^45.2.3"
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
   },
   "allowScripts": {
     "electron@45.2.3": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/omnitech/agent-terminal.git"
+  },
+  "build": {
+    "appId": "com.omnitech.agentterminal",
+    "productName": "Agent Terminal",
+    "artifactName": "Agent-Terminal-Setup-${version}.${ext}",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**",
+      "src/shim/**"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "omnitech",
+        "repo": "agent-terminal",
+        "private": true,
+        "releaseType": "release"
+      }
+    ]
   }
 }
