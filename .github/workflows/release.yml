@@ -1,16 +1,27 @@
-# Push a version tag (npm version patch|minor|major && git push --follow-tags) to build the
-# Windows installer and publish it as a GitHub Release. Installed copies pick it up via auto-update.
+# Release from GitHub: Actions → Release → Run workflow, pick the version bump, Run.
+# It tests, bumps package.json, commits + tags vX.Y.Z on master, builds the Windows installer,
+# and publishes a GitHub Release. Installed copies pick it up via auto-update.
+# Pushing a v* tag yourself (npm version patch && git push --follow-tags) still works too.
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (current = release the version already in package.json, e.g. the first release)
+        type: choice
+        options: [patch, minor, major, current]
+        default: patch
   push:
     tags: ['v*']
 
 permissions:
-  contents: write # create the release and upload the installer
+  contents: write # push the version commit + tag, create the release, upload the installer
 
 jobs:
   release:
+    # The button only releases master.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/master'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -18,11 +29,29 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Check the tag matches package.json
-        shell: bash
-        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm ci
       - run: npm test
+
+      - name: Bump version, commit and tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ inputs.bump }}" = "current" ]; then
+            git tag "v$(node -p "require('./package.json').version")"
+          else
+            npm version "${{ inputs.bump }}" -m "Release v%s"
+          fi
+          # Pushes made with GITHUB_TOKEN don't trigger workflows, so this tag won't start a second run.
+          git push origin HEAD:master --follow-tags
+          git push origin --tags
+
+      - name: Check the tag matches package.json
+        if: github.event_name == 'push'
+        shell: bash
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
       - name: Build and publish
         run: npm run release
         env:
