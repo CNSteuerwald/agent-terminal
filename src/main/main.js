@@ -102,7 +102,7 @@ function openExternal(url) {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url);
 }
 
-const payload = () => ({ ...current, home: os.homedir(), packaged: app.isPackaged });
+const payload = () => ({ ...current, home: os.homedir(), version: app.getVersion(), packaged: app.isPackaged });
 
 // Settings → General → Uninstall. Runs the installer's own uninstaller (removes the app, shortcuts and
 // the Apps & features entry) after we quit, and optionally deletes our data folders too.
