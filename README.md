@@ -51,6 +51,8 @@ Each release has three files, and auto-update needs all of them:
 
 Don't delete or rename these files on a published release.
 
+The release also has `Agent-Terminal-<version>.zip`, which holds those three files in one download. Teammates installing by hand should grab the zip, since browsers often block a bare unsigned `.exe`.
+
 **From the command line,** if you prefer:
 
 ```powershell

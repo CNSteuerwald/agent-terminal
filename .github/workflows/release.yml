@@ -65,6 +65,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # One zip with all three files, for manual downloads (browsers often block a bare unsigned .exe).
+      # The loose .exe, .blockmap and latest.yml must stay as separate assets: electron-updater fetches them by name.
+      - name: Zip the release files
+        shell: bash
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          (cd dist && 7z a -tzip "Agent-Terminal-$v.zip" "Agent-Terminal-Setup-$v.exe" "Agent-Terminal-Setup-$v.exe.blockmap" latest.yml)
+          gh release upload "v$v" "dist/Agent-Terminal-$v.zip"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish the release
         shell: bash
         run: gh release edit "v$(node -p "require('./package.json').version")" --draft=false --latest
