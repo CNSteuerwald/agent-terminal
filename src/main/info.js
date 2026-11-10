@@ -108,11 +108,19 @@ async function agentModel({ cwd, agentId, command, since }) {
   return modelFromCommand(command) || (await CONFIG_MODEL[agentId]?.(cwd)) || null;
 }
 
+// Short display name for a model id: "claude-opus-5-5" -> "Opus 5.5", "claude-sonnet-4-5-20250929" -> "Sonnet 4.5".
+// Other ids are shown as they are.
+function prettyModel(id) {
+  const m = id?.match(/^claude-([a-z]+)((?:-\d+)+?)(?:-\d{8})?(\[1m\])?$/);
+  if (!m) return id || null;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2].slice(1).replace(/-/g, '.')}${m[3] ? ' (1M)' : ''}`;
+}
+
 async function getInfo(req) {
   // Git follows the shell's folder; the model comes from where the agent was started.
   const agentReq = { ...req, cwd: req.agentCwd || req.cwd };
   const [git, model] = await Promise.all([gitInfo(req.cwd), req.agentId ? agentModel(agentReq) : null]);
-  return { git, model };
+  return { git, model, modelLabel: prettyModel(model) };
 }
 
-module.exports = { getInfo, parseGitStatus, claudeProjectDir, lastModel, modelFromCommand };
+module.exports = { getInfo, prettyModel, parseGitStatus, claudeProjectDir, lastModel, modelFromCommand };

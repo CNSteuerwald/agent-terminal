@@ -19,7 +19,7 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 
 ### Updating
 
-The app checks for new releases on launch and every 4 hours, and downloads them in the background. There are no pop-ups: the right end of the bottom bar shows `↓ Downloading update…`, then `✓ Update x.y.z ready · installs when you quit · Restart now`. Either keep working, and the update installs silently when you quit so the next launch is up to date, or click **Restart now** to install it immediately. Your tabs reopen either way.
+The app checks for new releases on launch and every 15 minutes, and downloads them in the background. There are no pop-ups: the right end of the bottom bar shows `↓ Downloading update…`, then `✓ Update x.y.z ready · installs when you quit · Restart now`. Either keep working, and the update installs silently when you quit so the next launch is up to date, or click **Restart now** to install it immediately. Your tabs reopen either way.
 
 While the repo is private, update checks use your GitHub CLI login. Run `gh auth login` once with the account that can see the repo. Without it, updates are manual: download and run the newest installer from Releases, and your settings and tabs are kept.
 
@@ -114,21 +114,23 @@ npm test
 
 ### Tabs and the sidebar
 
-- **+ Claude Code** (`Ctrl+Shift+T`) opens a tab with your default agent and a terminal, in the starting directory. The button is named after your default agent.
-- **+ Terminal** (`Ctrl+Alt+T`) opens a tab with just a terminal. `cd` wherever you want, then click **+ Claude Code** in the pane header, and the agent starts in the folder your shell is in.
-- **Open folder…** (`Ctrl+Shift+O`) picks a folder and opens a tab there.
-- The **▾** button opens a tab with a specific shell or a specific agent.
+- **+ New tab group** in the bottom left opens a menu of every way to start a tab:
+  - your default (`Ctrl+Shift+T`): the default template, or your default agent with a terminal
+  - **Terminal only** (`Ctrl+Alt+T`): `cd` wherever you want, then add an agent with the **+** on the pane strip, and it starts in the folder your shell is in
+  - a specific shell, a specific agent, or any of your templates
+  - **Open folder…** (`Ctrl+Shift+O`), the sbx tab, and Settings
 - **Tabs follow your shell.** The directory and git status update as you `cd`. PowerShell, cmd and Git Bash are set up for this automatically (they report the folder at each prompt). Other shells work if they emit the standard OSC 7 / OSC 9;9 sequences.
 - **Tabs reopen on launch.** Your tabs, folders, titles, split layout and window size are saved as you go, and restored the next time you start the app. Processes can't survive closing, so each pane restarts. Claude Code, Copilot and OpenCode are started with `--continue` to resume their last conversation in that folder, and start fresh if there isn't one. Turn this off in **Settings → General → Reopen tabs on launch**.
 - Each tab shows (toggle each in **Settings → Tabs**):
   - **Directory**: the tab's folder
   - **Git**: branch, ↑ahead / ↓behind, and number of changed files (✓ when clean)
-  - **Agent and model**: e.g. `✦ claude-opus-5-5 · Claude Code`
+  - **What runs in the tab**: the agent and its model, then the terminals, e.g. `✦ Claude Code · Opus 5.5   ›_ 2 terminals` (`+N` when there are more agents)
   - **Activity dot**:
-    - **Blue, pulsing:** the agent is working.
+    - **Blue, spinning** (with a light sweeping along the tab): the agent is working.
     - **Green:** the agent finished while you were on another tab.
     - **Amber:** it rang the bell (needs attention).
     - Output caused by your own typing, resizing or switching tabs doesn't count, and nothing counts until you've typed something to that agent.
+- **Hover a tab** for a card with the details: full folder, git status, every pane with its state (working, idle, running, exited) and the agent's current task title, how long the agent has been working, and when it last printed anything.
 - Double-click a tab title to rename it. Middle-click closes it. Drag tabs to reorder.
 - **Right-click a tab** to color it, rename it or close it. Choose a swatch or a custom color. The focused tab gets a soft tint of its color, and other tabs show just a colored edge. Colors are saved with your tabs.
 - Switch between a **vertical** sidebar and **horizontal** tabs in **Settings → Tabs**, or with the *Toggle vertical / horizontal tabs* command. Drag the sidebar edge to resize it. `Ctrl+Shift+S` hides it.
@@ -148,11 +150,13 @@ Each tab in the sidebar holds a layout of **panes**: terminals and agents, any n
   - `Esc` cancels a drag.
 - **Resize** by dragging the bar between panes, or with `Alt+Shift+Arrows`. **Move focus** between panes with `Alt+Arrows`. `Ctrl+Shift+I` jumps between your terminal and your agent.
 - **Right-click a pane's tab** to rename it, restart it, split it off, move it to a new tab or close it. Double-click renames.
-- Each agent's tab icon pulses while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
-- New tabs start as a terminal plus your default agent, arranged per **Settings → General → New tab layout** (agent right / left / below / above, or both as tabs in one group).
+- **Reopen an agent somewhere else:** right-click an agent's pane tab (Claude Code or any other agent CLI) and pick one of the folders the tab's terminals are in, under **Reopen agent in**. The agent restarts there (✓ marks where it runs now). Sandbox sessions don't offer this: they stay in their sandbox's workspace.
+- Each agent's ✦ tab icon spins while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
+- New tabs start as a terminal plus your default agent, arranged per **Settings → General → New tab layout** (agent right / left / below / above, or both as tabs in one group), unless you pick a template.
+- **Templates** (**Settings → Templates**) save a starting layout: which shells and agents a new tab opens with and where they sit, e.g. Claude Code on the left and PowerShell on the right. Split a box right or down, stack panes as tabs, pick what each pane runs, and drag the dividers to size them. **Save current tab as template** captures a tab you've already arranged. Choose one under **New tabs open with** to make it the default; all templates are also in the **+ New tab group** menu and the palette (*New tab from template: …*).
 - **Customize** in **Settings → Panes**: where new panes open, the snap preview and its animation, how much of a pane's edge counts as "split here" (vs. "stack as a tab"), and whether close buttons always show.
 - Layouts, including splits, sizes, stacked tabs and pane names, are saved and reopen with your tabs.
-- **Ctrl+scroll** over a terminal makes the text bigger or smaller (same as `Ctrl+=` / `Ctrl+-`, with `Ctrl+0` to reset).
+- **Zoom:** Ctrl+scroll over a terminal, `Ctrl+=` / `Ctrl+-`, or the zoom dropdown in the bottom bar (50% to 200%, relative to your font size in settings), and a **Reset** button (or `Ctrl+0`) appears whenever you're not at 100%.
 - When a process exits, press **Enter** in its pane to restart it.
 - In the agent pane, `Shift+Enter` sends a newline (Meta+Enter) instead of submitting, which Claude Code and most agent TUIs understand.
 
@@ -163,7 +167,7 @@ Turn this on in the setup wizard or **Settings → Sandboxes**. It needs [Docker
 - A tab titled **sbx** is pinned first in the tab list, styled in Docker blue so it stands apart from your workspace tabs. It runs the `sbx` dashboard (TUI) filling the whole tab, and the sidebar shows how many sandboxes are running.
 - When you open a sandbox from that dashboard (**Enter**, then **External terminal**), it opens **here as a new tab** named after the sandbox. The tab holds the sandbox session plus a host shell in the sandbox's workspace folder, with git status in the sidebar. Opening a sandbox that already has a tab switches to that tab.
 - If you choose **In this terminal** in the dashboard instead, the session runs inside the sbx tab, which is normal sbx behavior.
-- Closing the sbx tab is fine. Reopen it with *Open Docker Sandboxes (sbx) tab* from the palette or the **▾** menu.
+- Closing the sbx tab is fine. Reopen it with *Open Docker Sandboxes (sbx) tab* from the palette or the **+ New tab group** menu.
 
 **How it works (Windows):** when the sbx dashboard sees `WT_SESSION`, it opens sandboxes with `wt.exe -w new nt -- sbx … run --name <sandbox>`. Inside the sbx tab only, Agent Terminal puts its own small `wt.exe` first on `PATH` ([`src/shim/wt.cs`](src/shim/wt.cs)). That `wt.exe` sends the request to the app over a local named pipe, protected by a per-launch random token, and the app opens the tab. It only ever runs `sbx` with the arguments sbx asked for. The `wt.exe` is compiled on first use with the C# compiler built into Windows (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) and cached in the app's data folder. On macOS/Linux the sbx tab works, but sandboxes still open in sbx's own choice of external terminal.
 
@@ -255,8 +259,7 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "snapEdge": 30,                          // % of a pane that counts as its edge when dropping
   "paneCloseButton": "always",             // "always" | "hover"
   "agentPaneSize": 50,                     // percent
-  "theme": "dark",                         // "dark" | "light" | "system"
-  "colorScheme": "Campbell",
+  "colorScheme": "Campbell",               // every terminal and the app's own colors
   "fontFace": "'Cascadia Mono NF', 'Cascadia Mono', Consolas, monospace",
   "fontSize": 14,
   "cursorShape": "bar",                    // "bar" | "block" | "underline"
@@ -266,7 +269,7 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
 
   // Agents merge with the built-ins by id. Add your own or change a command.
   "agents": [
-    { "id": "claude", "command": "claude --model opus", "colorScheme": "One Half Dark" },
+    { "id": "claude", "command": "claude --model opus" },
     { "id": "aider", "name": "Aider", "command": "aider --no-auto-commits" }
   ],
 
@@ -280,13 +283,21 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "schemes": [],
 
   // Action id -> key combo (or a list of combos). "" unbinds.
-  "keybindings": { "toggleAgentPane": "ctrl+alt+a", "copy": ["ctrl+shift+c", "ctrl+insert"] }
+  "keybindings": { "toggleAgentPane": "ctrl+alt+a", "copy": ["ctrl+shift+c", "ctrl+insert"] },
+
+  // New-tab templates (easiest to edit in Settings → Templates). "defaultTemplate": "" uses agentPanePosition.
+  "templates": [
+    { "name": "Claude + PowerShell", "layout": { "split": "row", "sizes": [0.5, 0.5], "children": [
+      { "panes": [{ "kind": "agent", "agentId": "claude" }] },
+      { "panes": [{ "kind": "shell", "profile": "PowerShell" }] } ] } }
+  ],
+  "defaultTemplate": "Claude + PowerShell"
 }
 ```
 
 *(Comments are for illustration. The real file must be plain JSON.)*
 
-**Color schemes.** These are the same built-in schemes as Intelligent Terminal and Windows Terminal: Campbell, Campbell Powershell, Dimidium, Ottosson, Vintage, One Half Dark/Light, Solarized Dark/Light, Tango Dark/Light, Dark+, VSCode Dark/Light Modern, CGA and IBM 5153. Set a default, override it per shell profile or per agent, or switch the focused pane from the palette (*Color scheme: …*).
+**Color schemes.** These are the same built-in schemes as Intelligent Terminal and Windows Terminal: Campbell, Campbell Powershell, Dimidium, Ottosson, Vintage, One Half Dark/Light, Solarized Dark/Light, Tango Dark/Light, Dark+, VSCode Dark/Light Modern, CGA and IBM 5153. One scheme applies to the whole window: every terminal, plus the sidebar, bars, menus and settings, whose colors are derived from it (a light scheme gives a light app). Change it in **Settings → Appearance** or from the palette (*Color scheme: …*); everything switches at once.
 
 **Agent commands** run through your platform shell (`cmd /c` on Windows, `$SHELL -lc` elsewhere). npm shims such as `copilot.cmd` work, and anything you can type at a prompt works too.
 

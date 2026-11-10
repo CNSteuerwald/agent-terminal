@@ -5,7 +5,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { execFile } = require('child_process');
 
-const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
+const CHECK_EVERY_MS = 15 * 60 * 1000;
 
 let status = null; // null | { state: 'downloading' | 'ready', version, percent }
 let autoUpdater = null;

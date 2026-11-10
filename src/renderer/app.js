@@ -136,7 +136,7 @@ window.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { 
 const withAlpha = (hex, a) => /^#[0-9a-f]{6}$/i.test(hex) ? hex + Math.round(a * 255).toString(16).padStart(2, '0') : hex;
 
 function scheme(name) {
-  return S.schemes.find(s => s.name === name) || S.schemes.find(s => s.name === S.colorScheme) || S.schemes[0];
+  return S.schemes.find(s => s.name === name) || S.schemes[0];
 }
 
 function xtermTheme(name) {
@@ -171,7 +171,6 @@ class Pane {
     this.resume = !!spec.resume;      // next start resumes the agent's last conversation (restored tabs)
     this.ptyId = null;
     this.exited = false;
-    this.schemeOverride = null;
     this.lastInput = 0;   // output right after input/resize/focus is an echo or redraw, not agent work
     this.lastWork = 0;
     this.host = el('div', { className: 'term' });
@@ -179,13 +178,6 @@ class Pane {
   }
 
   get isAgent() { return this.kind === 'agent' || this.kind === 'sandbox'; }
-
-  def() {
-    if (this.kind === 'shell') return S.profiles.find(p => p.name === this.profile);
-    if (this.kind === 'agent') return agentDef(this.agentId);
-    if (this.kind === 'sandbox') return agentDef(this.sandbox.agent);
-    return null;
-  }
 
   name() {
     if (this.kind === 'shell') return this.profile;
@@ -197,13 +189,11 @@ class Pane {
   // Tab text: your name for it, else what runs in it (shells also show their folder).
   label() { return this.customTitle || (this.kind === 'shell' ? `${this.profile} · ${basename(this.cwd)}` : this.name()); }
 
-  schemeName() { return this.schemeOverride || this.def()?.colorScheme || S.colorScheme; }
-
   options() {
     return {
       fontFamily: S.fontFace, fontSize: clamp(S.fontSize + fontDelta, 6, 72),
       cursorStyle: S.cursorShape, cursorBlink: S.cursorBlink, scrollback: S.historySize,
-      theme: xtermTheme(this.schemeName()),
+      theme: xtermTheme(S.colorScheme),
     };
   }
 
@@ -503,8 +493,12 @@ function startPanes(tab) {
   return tab.starting;
 }
 
-function newTab({ cwd, profile, agent = S.defaultAgent } = {}) {
-  return createTab({ type: 'workspace', cwd, profile, agentId: agent });
+// A plain new tab uses the default template when one is set; asking for a profile or agent skips it.
+function newTab({ cwd, profile, agent, template } = {}) {
+  const name = template ?? (profile === undefined && agent === undefined ? S.defaultTemplate : '');
+  const tpl = name && S.templates.find(t => t.name === name);
+  if (tpl) return createTab({ type: 'workspace', cwd, layout: tpl.layout });
+  return createTab({ type: 'workspace', cwd, profile, agentId: agent ?? S.defaultAgent });
 }
 
 // Adds a pane to a tab: as a tab in a group, or split off to the right / below it.
@@ -615,8 +609,6 @@ function activate(tab) {
   tab.done = false;
   for (const t of tabs) t.view.classList.toggle('active', t === tab);
   startPanes(tab);
-  const first = primaryPane(tab);
-  if (first) document.documentElement.style.setProperty('--term-bg', scheme(first.schemeName()).background);
   renderTabs();
   requestAnimationFrame(() => {
     for (const p of tabPanes(tab)) p.refit();
@@ -671,7 +663,7 @@ function switchAgent(id) {
   if (p?.kind !== 'agent') return addPane(tab, { kind: 'agent', agentId: id });
   p.agentId = id;
   p.title = null;
-  tab.info.model = null;
+  tab.info.model = tab.info.modelLabel = null;
   p.applySettings();
   p.restart();
 }
@@ -693,7 +685,7 @@ function buildNode(tab, node) {
   if (node.kind === 'group') return buildGroup(tab, node);
   const box = el('div', { className: `split split-${node.dir}` });
   node.children.forEach((c, i) => {
-    if (i) box.append(gutter(tab, node, i - 1, box));
+    if (i) box.append(gutter(node, i - 1, box));
     const child = buildNode(tab, c);
     child.style.flex = `${node.sizes[i]} 1 0`;
     box.append(child);
@@ -776,7 +768,7 @@ function renamePane(p) {
   input.focus();
 }
 
-function gutter(tab, node, index, box) {
+function gutter(node, index, box, done = scheduleSave) {
   const g = el('div', { className: `gutter gutter-${node.dir}`, role: 'separator', ariaLabel: 'Resize panes' });
   g.onpointerdown = e => {
     g.setPointerCapture(e.pointerId);
@@ -789,7 +781,7 @@ function gutter(tab, node, index, box) {
       last = pos;
       [...box.children].filter(c => !c.classList.contains('gutter')).forEach((c, i) => { c.style.flex = `${node.sizes[i]} 1 0`; });
     };
-    g.onpointerup = () => { g.onpointermove = g.onpointerup = null; scheduleSave(); };
+    g.onpointerup = () => { g.onpointermove = g.onpointerup = null; done(); };
   };
   return g;
 }
@@ -817,9 +809,22 @@ function showAddMenu(tab, g, anchor) {
   ]);
 }
 
+// Agent CLIs (not sandboxes, which stay in their workspace) can restart in any folder the tab's terminals are in.
+function reopenAgentIn(p, dir) {
+  p.cwd = dir;
+  p.resume = false;
+  p.tab.info.model = p.tab.info.modelLabel = null;
+  p.restart();
+  updatePaneTab(p);
+  refreshInfo([p.tab]);
+  scheduleSave();
+}
+
 function showPaneMenu(p, at) {
   const multi = tabPanes(p.tab).length > 1;
+  const dirs = p.kind === 'agent' ? [...new Set(tabPanes(p.tab).filter(x => x.kind === 'shell').map(x => x.cwd))] : [];
   showMenu(at, [
+    ...(dirs.length ? ['Reopen agent in', ...dirs.map(d => ({ label: `${d === p.cwd ? '✓' : '\u2003'} ${shortPath(d)}`, run: () => reopenAgentIn(p, d) })), '-'] : []),
     { label: 'Rename', run: () => renamePane(p) },
     { label: 'Restart', run: () => p.restart() },
     multi && { label: 'Split right', run: () => dropPane(p.tab, p, { kind: 'group', group: Layout.groupOf(p.tab.root, p), side: 'right' }) },
@@ -984,15 +989,23 @@ function togglePaneZoom() {
 function setFontDelta(d) {
   fontDelta = clamp(d, 6 - S.fontSize, 72 - S.fontSize);
   for (const t of tabs) for (const p of tabPanes(t)) p.applySettings();
+  renderZoom();
 }
 
-function setPaneScheme(name) {
-  const p = focusedPane();
-  if (!p) return;
-  p.schemeOverride = name;
-  p.applySettings();
-  if (p === primaryPane(active)) document.documentElement.style.setProperty('--term-bg', scheme(name).background);
+// Bottom bar: terminal zoom relative to the font size in settings, with a reset when it differs.
+const ZOOM_LEVELS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200];
+function renderZoom() {
+  const size = clamp(S.fontSize + fontDelta, 6, 72);
+  const pct = Math.round(size / S.fontSize * 100);
+  // Ctrl+scroll moves 1px at a time, which can land between presets: list that level too.
+  const levels = [...new Set([...ZOOM_LEVELS, pct])].sort((a, b) => a - b);
+  $('#zoom-level').replaceChildren(...levels.map(l => el('option', { value: l, textContent: `${l}%`, selected: l === pct })));
+  $('#zoom-level').title = `Font ${size}px (default ${S.fontSize}px, set in Settings → Appearance). Ctrl+scroll also zooms.`;
+  $('#zoom-reset').hidden = fontDelta === 0;
 }
+$('#zoom-level').onchange = e => setFontDelta(Math.round(S.fontSize * e.target.value / 100) - S.fontSize);
+$('#zoom-reset').onclick = () => setFontDelta(0);
+
 
 // ---------------------------------------------------------------- session (reopen tabs on launch)
 // The sbx tab isn't saved: it comes back from the sandboxEnabled setting. Each tab saves its whole
@@ -1053,7 +1066,19 @@ function gitLine(g) {
   parts.push(g.changes
     ? el('span', { className: 'dirty', textContent: ` ● ${g.changes} changed` })
     : el('span', { className: 'clean', textContent: ' ✓' }));
-  return el('div', { className: 'meta git', title: 'Git branch and status' }, ...parts);
+  return el('div', { className: 'meta git' }, ...parts);
+}
+
+// What runs in a tab, in one line: the agent (and its model) first, then the terminals.
+function panesLine(tab) {
+  const all = tabPanes(tab);
+  const agents = all.filter(p => p.isAgent), shells = all.filter(p => p.kind === 'shell');
+  const lead = primaryAgent(tab) || agents[0];
+  const parts = [];
+  if (tab.type === 'sandbox') parts.push(`⧉ ${[tab.sandbox.agent || 'sandbox', tab.info.status].filter(Boolean).join(' · ')}`);
+  else if (lead) parts.push(`✦ ${[lead.name(), tab.info.modelLabel].filter(Boolean).join(' · ')}${agents.length > 1 ? ` +${agents.length - 1}` : ''}`);
+  if (shells.length) parts.push(shells.length === 1 ? `›_ ${shells[0].profile}` : `›_ ${shells.length} terminals`);
+  return parts.join('  ');
 }
 
 function tabMetas(tab) {
@@ -1064,36 +1089,29 @@ function tabMetas(tab) {
       className: 'meta', textContent: list ? `Docker Sandboxes · ${list.filter(s => s.status === 'running').length} running / ${list.length}` : 'Docker Sandboxes',
     })];
   }
-  const agent = primaryAgent(tab);
-  const moreAgents = tabPanes(tab).filter(p => p.kind === 'agent').length - 1;
-  const agentLine = tab.type === 'sandbox'
-    ? `⧉ sandbox · ${[tab.sandbox.agent, tab.info.status].filter(Boolean).join(' · ')}`
-    : agent && `✦ ${[tab.info.model, agentDef(agent.agentId)?.name].filter(Boolean).join(' · ')}${moreAgents > 0 ? `  +${moreAgents}` : ''}`;
+  const line = m.model && panesLine(tab);
   return [
-    m.directory && el('div', { className: 'meta dir', textContent: shortPath(tab.cwd), title: tab.cwd }),
+    m.directory && el('div', { className: 'meta dir', textContent: shortPath(tab.cwd) }),
     m.git && tab.info.git?.branch && gitLine(tab.info.git),
-    m.model && agentLine && el('div', { className: 'meta model', title: 'Agent and model', textContent: agentLine }),
+    line && el('div', { className: 'meta model', textContent: line }),
   ];
 }
 
 function tabItem(tab) {
   const isSbx = tab.type === 'sbx';
   const item = el('div', {
-    className: ['tab', `tab-${tab.type}`, tab === active && 'active', tab.attention && 'attention'].filter(Boolean).join(' '),
-    role: 'tab', tabIndex: 0, draggable: !isSbx, title: isSbx ? 'Docker Sandboxes (sbx)' : tab.cwd,
+    className: ['tab', `tab-${tab.type}`, tab === active && 'active', tab.attention && 'attention', isWorking(tab) && 'working'].filter(Boolean).join(' '),
+    role: 'tab', tabIndex: 0, draggable: !isSbx,
   });
   item.setAttribute('aria-selected', String(tab === active));
   const close = el('button', { className: 'tab-close', textContent: '×', title: 'Close tab', ariaLabel: `Close ${tabTitle(tab)}` });
   close.onclick = e => { e.stopPropagation(); closeTab(tab); };
   const title = el('span', { className: 'tab-title', textContent: tabTitle(tab) });
   title.ondblclick = () => startRename(tab, title);
-  const state = isWorking(tab) ? ['working', 'Agent is working']
-    : tab.attention ? ['attention', 'Needs attention']
-      : tab.done ? ['done', 'Agent finished']
-        : ['', 'Agent idle'];
+  const state = tabState(tab);
   const marker = isSbx
     ? el('span', { className: 'sbx-icon', textContent: '⬢', ariaHidden: 'true' })
-    : el('span', { className: `dot ${state[0]}`, title: state[1] });
+    : el('span', { className: `dot ${state[0]}`, role: 'img', ariaLabel: state[1] });
   item.append(el('div', { className: 'tab-head' }, marker, title, close), el('div', { className: 'metas' }, ...tabMetas(tab)));
   item.onclick = () => activate(tab);
   item.onauxclick = e => { if (e.button === 1) closeTab(tab); };
@@ -1121,9 +1139,15 @@ function tabItem(tab) {
   return item;
 }
 
+const tabState = tab => (isWorking(tab) ? ['working', 'Agent is working']
+  : tab.attention ? ['attention', 'Needs attention']
+    : tab.done ? ['done', 'Agent finished']
+      : ['', 'Idle']);
+
 function renderTabs() {
   if (renaming || !S) return;
   $('#tabs').replaceChildren(...tabs.map(tabItem));
+  if (tipTab) showTip(tipTab);
   api.setTabCount(tabs.length);
   scheduleSave();
   document.title = active ? `${tabTitle(active)} - Agent Terminal` : 'Agent Terminal';
@@ -1149,6 +1173,97 @@ function startRename(tab, titleEl) {
   input.focus();
 }
 
+// ---------------------------------------------------------------- tab hover card
+// Hovering (or keyboard-focusing) a tab shows what's going on in it: folder, git, and every pane's state.
+let hoverTab = null, tipTab = null, tipTimer = 0;
+
+const ago = ms => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
+};
+
+function paneState(p, now) {
+  if (p.exited) return ['exited', 'Exited'];
+  if (!p.ptyId) return ['', p.term ? 'Starting' : 'Starts when you open the tab'];
+  if (p.kind === 'sbx') return ['', 'Running'];
+  if (p.isAgent) return now - p.lastWork < 2000 ? ['working', 'Working'] : ['', 'Idle'];
+  return ['', 'Running'];
+}
+
+function tipContent(tab) {
+  const now = Date.now();
+  const [cls, label] = tabState(tab);
+  const head = el('div', { className: 'tip-head' },
+    el('strong', { textContent: tabTitle(tab) }),
+    el('span', { className: `tip-state ${cls}`, textContent: cls === 'working' && tab.busySince ? `${label} · ${ago(now - tab.busySince)}` : label }));
+  if (tab.type === 'sbx') {
+    const list = tab.info.sandboxes || [];
+    return [head, el('div', { className: 'tip-sub', textContent: 'Docker Sandboxes dashboard (sbx)' }),
+      ...list.map(sb => el('div', { className: 'tip-row' }, el('span', { textContent: '⧉' }), el('span', { textContent: `${sb.name} · ${sb.agent || ''} · ${sb.status}` })))];
+  }
+  const g = tab.info.git;
+  const gitText = g?.branch && [`Git: ${g.branch}`, g.ahead && `↑${g.ahead}`, g.behind && `↓${g.behind}`, g.changes ? `${g.changes} changed` : 'clean'].filter(Boolean).join('  ');
+  const all = tabPanes(tab);
+  return [
+    head,
+    el('div', { className: 'tip-sub', textContent: tab.cwd }),
+    gitText && el('div', { className: 'tip-sub', textContent: gitText }),
+    el('div', { className: 'tip-label', textContent: `${all.length} pane${all.length === 1 ? '' : 's'}` }),
+    ...all.map(p => {
+      const [pc, pl] = paneState(p, now);
+      const model = p === primaryAgent(tab) && tab.info.modelLabel;
+      // Agents put their current task in the terminal title (Claude Code does); shells, their folder.
+      const detail = p.isAgent ? p.title : p.cwd !== tab.cwd && shortPath(p.cwd);
+      return el('div', { className: 'tip-row' + (p === tab.focused ? ' focused' : '') },
+        el('span', { className: `tip-icon ${pc}`, textContent: PANE_ICONS[p.kind], ariaHidden: 'true' }),
+        el('span', { className: 'tip-pane' },
+          el('span', { textContent: [p.label(), model].filter(Boolean).join(' · ') }),
+          detail && el('small', { textContent: detail })),
+        el('span', { className: `tip-pstate ${pc}`, textContent: pl }));
+    }),
+    tab.lastAgentOutput > 0 && el('div', { className: 'tip-foot', textContent: `Last agent output ${ago(now - tab.lastAgentOutput)} ago` }),
+  ];
+}
+
+function showTip(tab) {
+  const item = $('#tabs').children[tabs.indexOf(tab)];
+  const tip = $('#tab-tip');
+  if (!item || !S) return hideTip();
+  tipTab = tab;
+  tip.replaceChildren(...tipContent(tab).filter(Boolean));
+  tip.hidden = false;
+  const r = item.getBoundingClientRect();
+  const vertical = $('#app').classList.contains('vertical');
+  const left = vertical ? r.right + 8 : r.left;
+  const top = vertical ? r.top : r.bottom + 6;
+  tip.style.left = `${clamp(left, 8, innerWidth - tip.offsetWidth - 8)}px`;
+  tip.style.top = `${clamp(top, 8, innerHeight - tip.offsetHeight - 8)}px`;
+}
+
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipTab = null;
+  $('#tab-tip').hidden = true;
+}
+
+function hoverTabAt(target, delay) {
+  const item = target?.closest?.('#tabs .tab');
+  const tab = item ? tabs[[...$('#tabs').children].indexOf(item)] : null;
+  if (tab === hoverTab) return;
+  hoverTab = tab;
+  hideTip();
+  if (tab) tipTimer = setTimeout(() => showTip(tab), delay);
+}
+$('#tabs').addEventListener('pointerover', e => hoverTabAt(e.target, 450));
+$('#tabs').addEventListener('pointerleave', () => { hoverTab = null; hideTip(); });
+$('#tabs').addEventListener('focusin', e => hoverTabAt(e.target, 0));
+$('#tabs').addEventListener('focusout', () => { hoverTab = null; hideTip(); });
+// Clicking, dragging or renaming dismisses it until the pointer moves to another tab.
+window.addEventListener('pointerdown', hideTip, true);
+window.addEventListener('dragstart', hideTip, true);
+
 // Activity dots change without any event, so re-render when they flip. When a stretch of work
 // (at least a few seconds of output) ends on a tab you're not looking at, mark it done (green).
 let lastWorking = '';
@@ -1160,6 +1275,7 @@ setInterval(() => {
   }
   const w = tabs.map(t => `${isWorking(t)}${t.done}`).join();
   if (w !== lastWorking) { lastWorking = w; renderTabs(); }
+  else if (tipTab) showTip(tipTab); // keep its timers and pane states live
   // Each agent's own tab icon pulses while that agent works.
   const now = Date.now();
   for (const p of tabPanes(active)) p.tabEl?.querySelector('.ptab-icon').classList.toggle('working', p.isAgent && now - p.lastWork < 2000);
@@ -1174,10 +1290,10 @@ async function refreshInfo(list = tabs) {
     if (!(S.tabMetadata.git || S.tabMetadata.model)) return;
     try {
       const a = primaryAgent(t);
-      const { git, model } = await api.getInfo({
+      const { git, model, modelLabel } = await api.getInfo({
         cwd: t.cwd, agentCwd: a?.cwd, agentId: a?.agentId, command: agentDef(a?.agentId)?.command, since: a?.agentStarted || 0,
       });
-      Object.assign(t.info, { git, model });
+      Object.assign(t.info, { git, model, modelLabel });
     } catch { /* keep the last known info */ }
   }));
   renderTabs();
@@ -1234,15 +1350,17 @@ function showMenu(anchor, items) {
 }
 document.addEventListener('pointerdown', e => { if (!e.target.closest('#menu, #new-tab-menu')) $('#menu').hidden = true; });
 
-$('#new-agent-tab').onclick = () => newTab();
-$('#new-shell-tab').onclick = () => newTab({ agent: '' });
 $('#settings-btn').onclick = () => openSettings();
 $('#new-tab-menu').onclick = e => showMenu(e.currentTarget, [
-  'Shell',
+  { label: `${defaultTabLabel()}  (Ctrl+Shift+T)`, run: () => newTab() },
+  { label: 'Terminal only  (Ctrl+Alt+T)', run: () => newTab({ agent: '' }) },
+  '-', 'Shell',
   ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => newTab({ profile: p.name }) })),
   '-', 'Agent',
   ...S.agents.map(a => ({ label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
-  { label: 'No agent', run: () => newTab({ agent: '' }) },
+  '-', 'Template',
+  ...S.templates.map(t => ({ label: t.name + (t.name === S.defaultTemplate ? ' (default)' : ''), run: () => newTab({ template: t.name }) })),
+  { label: 'Edit templates…', run: () => openSettings('Templates') },
   '-',
   { label: 'Open folder…', run: openFolderTab },
   S.sandboxEnabled && { label: 'Docker Sandboxes (sbx)', run: () => ensureSbxTab({ activate: true }) },
@@ -1305,10 +1423,12 @@ function openPalette() {
   paletteItems = [
     ...actions,
     ...S.profiles.map(p => ({ name: `New tab: ${p.name}`, run: () => newTab({ profile: p.name }) })),
+    ...S.templates.map(t => ({ name: `New tab from template: ${t.name}`, run: () => newTab({ template: t.name }) })),
+    { name: 'Save tab as template', run: saveTabAsTemplate },
     ...S.profiles.map(p => ({ name: `New terminal pane: ${p.name}`, run: () => addPane(active, { kind: 'shell', profile: p.name }) })),
     ...S.agents.map(a => ({ name: `New agent pane: ${a.name}`, run: () => addPane(active, { kind: 'agent', agentId: a.id }) })),
     ...S.agents.map(a => ({ name: `Switch agent: ${a.name}`, run: () => switchAgent(a.id) })),
-    ...S.schemes.map(s => ({ name: `Color scheme: ${s.name}`, run: () => setPaneScheme(s.name) })),
+    ...S.schemes.map(s => ({ name: `Color scheme: ${s.name}`, run: () => set('colorScheme', s.name) })),
     ...tabs.map(t => ({ name: `Go to tab: ${tabTitle(t)}`, hint: t.type === 'sbx' ? '' : shortPath(t.cwd), run: () => activate(t) })),
   ];
   $('#palette').hidden = false;
@@ -1398,11 +1518,128 @@ function swatches(name) {
 }
 const NEW_TAB_LAYOUTS = [['right', 'Agent on the right'], ['left', 'Agent on the left'], ['bottom', 'Agent below'],
   ['top', 'Agent above'], ['tab', 'Terminal and agent as tabs']];
-const schemeOptions = withDefault => [...(withDefault ? [['', 'Use default']] : []), ...S.schemes.map(s => s.name)];
+const schemeOptions = () => S.schemes.map(s => s.name);
 function browseButton(onPick) {
   const b = el('button', { textContent: 'Browse…', type: 'button' });
   b.onclick = async e => { e.preventDefault(); const d = await api.openFolder(); if (d) onPick(d); };
   return b;
+}
+
+// What a plain new tab opens: the default template, else the default agent with a terminal.
+function defaultTabLabel() {
+  if (S.templates.some(t => t.name === S.defaultTemplate)) return `Template: ${S.defaultTemplate}`;
+  const agent = agentDef(S.defaultAgent)?.name;
+  return agent ? `${agent} + terminal` : 'Terminal';
+}
+
+// ---------------------------------------------------------------- new-tab templates
+// A template is { name, layout }: a pane tree in Layout.serialize form whose panes are
+// { kind: 'shell', profile } or { kind: 'agent', agentId } (plus an optional title).
+const paneChoices = () => [...S.profiles.map(p => [`shell:${p.name}`, `›_  ${p.name}`]), ...S.agents.map(a => [`agent:${a.id}`, `✦  ${a.name}`])];
+const choiceOf = p => (p.kind === 'agent' ? `agent:${p.agentId}` : `shell:${p.profile}`);
+function specOf(choice) {
+  const [kind, ...rest] = choice.split(':');
+  return kind === 'agent' ? { kind, agentId: rest.join(':') } : { kind: 'shell', profile: rest.join(':') };
+}
+const templatePane = p => ({
+  ...(p.kind === 'agent' ? { kind: 'agent', agentId: p.agentId } : { kind: 'shell', profile: p.kind === 'shell' ? p.profile : S.defaultProfile }),
+  ...(p.customTitle && { title: p.customTitle }),
+});
+
+function uniqueTemplateName(base, except) {
+  const taken = n => S.templates.some(t => t.name === n && t !== except);
+  let name = base, i = 2;
+  while (taken(name)) name = `${base} ${i++}`;
+  return name;
+}
+
+function addTemplate(layout, base = 'New template') {
+  set('templates', [...S.templates, { name: uniqueTemplateName(base), layout }]);
+}
+
+function saveTabAsTemplate() {
+  if (active?.type !== 'workspace') return notify('Only folder tabs can be saved as templates');
+  addTemplate(Layout.serialize(active.root, templatePane), tabTitle(active));
+  openSettings('Templates');
+}
+
+function templatesSection() {
+  const agentId = S.defaultAgent || S.agents[0]?.id;
+  const starter = agentId
+    ? { split: 'row', sizes: [0.5, 0.5], children: [{ panes: [{ kind: 'agent', agentId }] }, { panes: [{ kind: 'shell', profile: S.defaultProfile }] }] }
+    : { panes: [{ kind: 'shell', profile: S.defaultProfile }] };
+  const newBtn = el('button', { textContent: '+ New template', type: 'button', className: 'secondary' });
+  newBtn.onclick = () => addTemplate(starter);
+  const saveBtn = el('button', { textContent: 'Save current tab as template', type: 'button', className: 'secondary', disabled: active?.type !== 'workspace' });
+  saveBtn.onclick = saveTabAsTemplate;
+  return [
+    el('p', { className: 'note', textContent: 'A template sets which terminals and agents a new tab opens with, and where they sit. Split a box to add a pane beside or below it, add a tab to stack panes, and drag the dividers to size them. Or arrange a tab the way you like and save it here.' }),
+    field('New tabs open with', select(S.defaultTemplate, [['', 'Terminal + default agent (General → New tab layout)'], ...S.templates.map(t => t.name)], v => set('defaultTemplate', v)),
+      'Used by the bottom bar button, Ctrl+Shift+T and new windows. Every template is also in the ▾ menu and the command palette.'),
+    el('div', { className: 'row tpl-actions' }, newBtn, saveBtn),
+    ...S.templates.map(templateCard),
+  ];
+}
+
+function templateCard(tpl) {
+  let root = Layout.deserialize(tpl.layout, j => ({ ...j }));
+  const commit = (patch = {}) => {
+    const next = { ...tpl, layout: Layout.serialize(root, p => p), ...patch };
+    const update = { templates: S.templates.map(t => (t === tpl ? next : t)) };
+    if (patch.name && S.defaultTemplate === tpl.name) update.defaultTemplate = patch.name;
+    api.updateSettings(update);
+  };
+  const button = (text, title, onclick, cls = '') => Object.assign(el('button', { textContent: text, title, ariaLabel: title, type: 'button', className: cls }), { onclick });
+  const fresh = () => ({ kind: 'shell', profile: S.defaultProfile });
+  const total = Layout.panes(root).length;
+
+  const slot = p => {
+    const pick = select(choiceOf(p), paneChoices(), v => {
+      for (const k of ['kind', 'profile', 'agentId']) delete p[k];
+      Object.assign(p, specOf(v));
+      commit();
+    });
+    pick.ariaLabel = 'Pane runs';
+    return el('div', { className: 'tpl-slot' }, pick,
+      total > 1 && button('×', 'Remove this pane', () => { root = Layout.removePane(root, p); commit(); }, 'tpl-x'));
+  };
+  const build = node => {
+    if (node.kind === 'group') {
+      return el('div', { className: 'tpl-group' },
+        node.panes.length > 1 && el('div', { className: 'tpl-stacked', textContent: `${node.panes.length} panes as tabs` }),
+        ...node.panes.map(slot),
+        el('div', { className: 'tpl-tools' },
+          button('Split →', 'Add a pane to the right', () => { root = Layout.splitAt(root, node, Layout.group([fresh()]), 'right'); commit(); }),
+          button('Split ↓', 'Add a pane below', () => { root = Layout.splitAt(root, node, Layout.group([fresh()]), 'bottom'); commit(); }),
+          button('+ Tab', 'Stack another pane here as a tab', () => { Layout.addToGroup(node, fresh()); commit(); })));
+    }
+    const box = el('div', { className: `tpl-split split-${node.dir}` });
+    node.children.forEach((c, i) => {
+      if (i) box.append(gutter(node, i - 1, box, () => commit()));
+      const child = build(c);
+      child.style.flex = `${node.sizes[i]} 1 0`;
+      box.append(child);
+    });
+    return box;
+  };
+
+  const name = el('input', { type: 'text', value: tpl.name, className: 'tpl-name', ariaLabel: 'Template name' });
+  name.onchange = () => {
+    const v = name.value.trim();
+    if (!v || v === tpl.name) { name.value = tpl.name; return; }
+    commit({ name: uniqueTemplateName(v, tpl) });
+  };
+  const isDefault = S.defaultTemplate === tpl.name;
+  return el('div', { className: 'tpl-card' + (isDefault ? ' default' : '') },
+    el('div', { className: 'tpl-head' }, name,
+      isDefault ? el('span', { className: 'tpl-badge', textContent: 'Default for new tabs' })
+        : button('Use for new tabs', 'Open new tabs with this template', () => set('defaultTemplate', tpl.name), 'link'),
+      el('span', { className: 'spacer' }),
+      button('Open', 'Open a new tab from this template', () => { closeSettings(); newTab({ template: tpl.name }); }, 'secondary'),
+      button('Delete', 'Delete this template', () => api.updateSettings({
+        templates: S.templates.filter(t => t !== tpl), ...(isDefault && { defaultTemplate: '' }),
+      }), 'danger')),
+    el('div', { className: 'tpl-preview' }, build(root)));
 }
 
 // ---------------------------------------------------------------- settings UI
@@ -1433,7 +1670,7 @@ const SECTIONS = {
       input(S.startingDirectory, v => set('startingDirectory', v)), browseButton(d => set('startingDirectory', d))),
     'Folder for new tabs. Use "Open folder…" (Ctrl+Shift+O) to open a tab somewhere else.'),
     field('New tab layout', select(S.agentPanePosition, NEW_TAB_LAYOUTS, v => set('agentPanePosition', v)),
-      'How the terminal and agent are arranged in a new tab. Rearrange any tab by dragging its pane tabs.'),
+      'How the terminal and agent are arranged in a new tab, unless a template is set (Settings → Templates). Rearrange any tab by dragging its pane tabs.'),
     field('Agent pane size (%)', input(S.agentPaneSize, v => set('agentPaneSize', clamp(v, 10, 90)), 'number')),
     field('Copy on select', checkbox(S.copyOnSelect, v => set('copyOnSelect', v))),
     field('Drag selects text in apps that use the mouse', checkbox(S.dragToSelect, v => set('dragToSelect', v)),
@@ -1458,9 +1695,10 @@ const SECTIONS = {
     el('h3', { textContent: 'Tab details' }),
     field('Directory', checkbox(S.tabMetadata.directory, v => set('tabMetadata', { directory: v }))),
     field('Git branch and status', checkbox(S.tabMetadata.git, v => set('tabMetadata', { git: v }))),
-    field('Agent and model', checkbox(S.tabMetadata.model, v => set('tabMetadata', { model: v })),
-      'Claude Code: read live from its session transcript. Others: from --model in the agent command or the CLI\'s config file.'),
-    field('Agent activity indicator', checkbox(S.tabMetadata.activity, v => set('tabMetadata', { activity: v }))),
+    field('What runs in the tab', checkbox(S.tabMetadata.model, v => set('tabMetadata', { model: v })),
+      'The agent and its model, then the terminals. Claude Code\'s model is read live from its session; other agents\' from --model or their config file.'),
+    field('Agent activity indicator', checkbox(S.tabMetadata.activity, v => set('tabMetadata', { activity: v })),
+      'Animated while an agent works, orange when it needs attention, green when it finished in the background. Hover a tab for details.'),
   ],
   Panes: () => [
     el('p', { className: 'note', textContent: 'Each tab can hold any number of terminals and agents. Drag a pane\'s tab onto the edge of another pane to split, onto its middle or its tab strip to stack it as a tab, onto a tab in the sidebar to move it there, or onto empty sidebar space to give it its own tab.' }),
@@ -1472,9 +1710,10 @@ const SECTIONS = {
       'How far into a pane counts as its edge (splits). Closer to the middle stacks the pane as a tab.'),
     field('Close buttons on pane tabs', select(S.paneCloseButton, [['always', 'Always'], ['hover', 'Active tab and on hover']], v => set('paneCloseButton', v))),
   ],
+  Templates: templatesSection,
   Appearance: () => [
-    field('Theme', select(S.theme, ['dark', 'light', 'system'], v => set('theme', v))),
-    field('Default color scheme', select(S.colorScheme, schemeOptions(false), v => set('colorScheme', v))),
+    field('Color scheme', select(S.colorScheme, schemeOptions(), v => set('colorScheme', v)),
+      'Every terminal and the app itself. A light scheme gives a light app. Also in the palette: Color scheme: …'),
     swatches(S.colorScheme),
     field('Font face', input(S.fontFace, v => set('fontFace', v))),
     field('Font size', input(S.fontSize, v => set('fontSize', clamp(v, 6, 72)), 'number'), 'Ctrl+scroll or Ctrl+= / Ctrl+- changes it temporarily.'),
@@ -1485,20 +1724,18 @@ const SECTIONS = {
   Profiles: () => [
     el('p', { className: 'note', textContent: 'Shells detected on this machine. Add or hide profiles in settings.json.' }),
     el('table', { className: 'list' },
-      el('tr', {}, el('th', { textContent: 'Name' }), el('th', { textContent: 'Command' }), el('th', { textContent: 'Color scheme' })),
+      el('tr', {}, el('th', { textContent: 'Name' }), el('th', { textContent: 'Command' })),
       ...S.profiles.map(p => el('tr', {},
         el('td', { textContent: p.name }),
-        el('td', { className: 'muted', textContent: [p.commandline, ...(p.args || [])].join(' ') }),
-        el('td', {}, select(p.colorScheme || '', schemeOptions(true), v => set('profiles', [{ name: p.name, colorScheme: v || undefined }])))))),
+        el('td', { className: 'muted', textContent: [p.commandline, ...(p.args || [])].join(' ') })))),
   ],
   Agents: () => [
     el('p', { className: 'note', textContent: 'The agent pane runs this command in your shell, exactly as if you typed it. Add flags such as --model or --continue here.' }),
     el('table', { className: 'list' },
-      el('tr', {}, el('th', { textContent: 'Agent' }), el('th', { textContent: 'Command' }), el('th', { textContent: 'Color scheme' })),
+      el('tr', {}, el('th', { textContent: 'Agent' }), el('th', { textContent: 'Command' })),
       ...S.agents.map(a => el('tr', {},
         el('td', { textContent: a.name }),
-        el('td', {}, Object.assign(input(a.command, v => v.trim() && set('agents', [{ id: a.id, command: v.trim() }])), { className: 'command' })),
-        el('td', {}, select(a.colorScheme || '', schemeOptions(true), v => set('agents', [{ id: a.id, colorScheme: v || undefined }])))))),
+        el('td', {}, Object.assign(input(a.command, v => v.trim() && set('agents', [{ id: a.id, command: v.trim() }])), { className: 'command' }))))),
   ],
   Sandboxes: () => [
     el('p', { className: 'note', textContent: 'Docker Sandboxes runs agents in isolated containers. When enabled, a pinned "sbx" tab runs the sbx dashboard, and sandboxes you open from it with "External terminal" open here as new tabs.' }),
@@ -1551,7 +1788,7 @@ async function runWizard() {
     const d = {
       defaultAgent: S.setupComplete || installed(S.defaultAgent) ? S.defaultAgent : firstInstalled || S.defaultAgent,
       defaultProfile: S.defaultProfile, startingDirectory: S.startingDirectory,
-      tabLayout: S.tabLayout, agentPanePosition: S.agentPanePosition, theme: S.theme, colorScheme: S.colorScheme,
+      tabLayout: S.tabLayout, agentPanePosition: S.agentPanePosition, colorScheme: S.colorScheme,
       tabMetadata: { ...S.tabMetadata }, sandboxEnabled: S.sandboxEnabled && detect.sbx,
     };
     let step = 0;
@@ -1578,11 +1815,10 @@ async function runWizard() {
       ['Layout and look', 'All of this can be changed later in Settings (Ctrl+,).', () => [
         field('Tabs', select(d.tabLayout, [['vertical', 'Vertical sidebar'], ['horizontal', 'Horizontal, along the top']], v => { d.tabLayout = v; })),
         field('New tab layout', select(d.agentPanePosition, NEW_TAB_LAYOUTS, v => { d.agentPanePosition = v; })),
-        field('Theme', select(d.theme, ['dark', 'light', 'system'], v => { d.theme = v; })),
-        field('Color scheme', select(d.colorScheme, schemeOptions(false), v => { d.colorScheme = v; renderStep(); })),
+        field('Color scheme', select(d.colorScheme, schemeOptions(), v => { d.colorScheme = v; renderStep(); })),
         swatches(d.colorScheme),
         field('Show in each tab', el('div', { className: 'checks' },
-          ...[['directory', 'Directory'], ['git', 'Git branch and status'], ['model', 'Agent and model']].map(([k, l]) =>
+          ...[['directory', 'Directory'], ['git', 'Git branch and status'], ['model', 'What runs in the tab (agent, model, terminals)']].map(([k, l]) =>
             el('label', {}, checkbox(d.tabMetadata[k], v => { d.tabMetadata[k] = v; }), ` ${l}`)))),
       ]],
       ['Docker Sandboxes', 'Run agents in isolated containers with Docker Sandboxes (sbx).', () => [
@@ -1622,11 +1858,23 @@ async function runWizard() {
 }
 
 // ---------------------------------------------------------------- apply settings
-function applyTheme() {
-  const dark = S.theme === 'dark' || (S.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+// The color scheme drives the whole window: every terminal, and the app's own colors derived from it.
+function luminance(hex) {
+  const n = parseInt(hex.slice(1, 7), 16);
+  return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
 }
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => S && applyTheme());
+function applyTheme() {
+  const s = scheme(S.colorScheme);
+  const dark = luminance(s.background) < 0.5;
+  const mix = pct => `color-mix(in srgb, ${s.foreground} ${pct}%, ${s.background})`;
+  const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  for (const [k, v] of Object.entries({
+    '--term-bg': s.background, '--bg': mix(dark ? 6 : 4), '--bg2': mix(dark ? 10 : 2), '--fg': s.foreground,
+    '--muted': mix(62), '--border': mix(dark ? 18 : 16), '--hover': `color-mix(in srgb, ${s.foreground} 9%, transparent)`,
+    '--accent': (dark ? s.brightBlue : s.blue) || s.cursorColor, '--danger': (dark ? s.brightRed : s.red) || '#ff6b6b',
+  })) root.style.setProperty(k, v);
+}
 
 let toastTimer;
 function toast(msg, info = false, ms = 8000) {
@@ -1676,11 +1924,7 @@ function apply(payload) {
   document.documentElement.style.setProperty('--sidebar-w', `${S.sidebarWidth}px`);
   document.body.dataset.closeButtons = S.paneCloseButton;
   for (const t of tabs) for (const p of tabPanes(t)) p.applySettings();
-  if (active) document.documentElement.style.setProperty('--term-bg', scheme(primaryPane(active).schemeName()).background);
-  const agentName = agentDef(S.defaultAgent)?.name;
-  $('#new-agent-tab').hidden = !agentName;
-  $('#new-agent-tab').textContent = `+ ${agentName || 'Agent'}`;
-  $('#new-agent-tab').title = `New tab with ${agentName} and a terminal (Ctrl+Shift+T)`;
+  renderZoom();
   syncSbxTab();
   renderTabs();
   renderSettings();
