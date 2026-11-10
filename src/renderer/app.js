@@ -166,7 +166,11 @@ function agentLook(agentId) {
   const a = agentDef(agentId);
   return { icon: AgentIcons.has(a?.icon) ? a.icon : 'spark', color: HEX_COLOR.test(a?.iconColor || '') ? a.iconColor : null };
 }
-const paneLook = p => agentLook(p.kind === 'sandbox' ? p.sandbox?.agent : p.agentId);
+// A colored tab (right-click → Tab color) paints its agents' icons in its color.
+function paneLook(p) {
+  const look = agentLook(p.kind === 'sandbox' ? p.sandbox?.agent : p.agentId);
+  return HEX_COLOR.test(p.tab?.color || '') ? { ...look, color: p.tab.color } : look;
+}
 
 // state: '' | 'idle' | 'working' | 'attention' | 'done'. A null color inherits --ai-color (else the accent).
 function iconEl({ icon, color }, state = '', label = '') {
@@ -1211,9 +1215,8 @@ const ago = ms => {
 function paneState(p, now) {
   if (p.exited) return ['exited', 'Exited'];
   if (!p.ptyId) return ['', p.term ? 'Starting' : 'Starts when you open the tab'];
-  if (p.kind === 'sbx') return ['', 'Running'];
   if (p.isAgent) return now - p.lastWork < 2000 ? ['working', 'Working'] : ['', 'Idle'];
-  return ['', 'Running'];
+  return ['', '']; // a running terminal needs no label
 }
 
 function tipContent(tab) {
@@ -1249,7 +1252,7 @@ function tipContent(tab) {
         el('span', { className: 'tip-pane' },
           el('span', { textContent: [p.label(), model].filter(Boolean).join(' · ') }),
           detail && el('small', { textContent: detail })),
-        el('span', { className: `tip-pstate ${pc}`, textContent: pl }));
+        pl && el('span', { className: `tip-pstate ${pc}`, textContent: pl }));
     }),
     tab.lastAgentOutput > 0 && el('div', { className: 'tip-foot', textContent: `Last agent output ${ago(now - tab.lastAgentOutput)} ago` }),
   ];
@@ -1334,6 +1337,7 @@ const TAB_COLORS = ['#E74856', '#F7630C', '#FFB900', '#16C60C', '#00B7C3', '#007
 
 function setTabColor(tab, color) {
   tab.color = color || null;
+  for (const p of tabPanes(tab)) updatePaneTab(p); // pane tab icons follow the tab color
   renderTabs();
 }
 
