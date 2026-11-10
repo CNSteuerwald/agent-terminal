@@ -49,7 +49,6 @@ const DEFAULTS = {
   paneAnimations: true,
   snapEdge: 30,                // % of a pane counted as its edge when dropping (split vs. stack)
   paneCloseButton: 'always',   // always | hover
-  theme: 'dark',
   colorScheme: 'Campbell',
   // Nerd Fonts first so oh-my-posh/starship prompt glyphs render; missing fonts are skipped.
   fontFace: "'CaskaydiaCove Nerd Font Mono', 'Cascadia Mono NF', 'FiraCode Nerd Font Mono', 'JetBrainsMono Nerd Font Mono', 'Cascadia Mono', Consolas, Menlo, monospace",
@@ -64,6 +63,10 @@ const DEFAULTS = {
   agents: [],
   schemes: [],
   keybindings: {},
+  // New-tab templates: { name, layout } where layout is a pane tree (see layout.js serialize) of
+  // { kind: 'shell', profile } and { kind: 'agent', agentId } panes. '' = terminal + default agent.
+  templates: [],
+  defaultTemplate: '',
 };
 
 function detectShells() {
@@ -71,9 +74,9 @@ function detectShells() {
     const sys = process.env.SystemRoot || 'C:\\Windows';
     const pf = process.env.ProgramFiles || 'C:\\Program Files';
     return [
-      { name: 'PowerShell', commandline: `${pf}\\PowerShell\\7\\pwsh.exe`, args: ['-NoLogo'], colorScheme: 'Campbell' },
-      { name: 'Windows PowerShell', commandline: `${sys}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, args: ['-NoLogo'], colorScheme: 'Campbell' },
-      { name: 'Command Prompt', commandline: `${sys}\\System32\\cmd.exe`, args: [], colorScheme: 'Campbell' },
+      { name: 'PowerShell', commandline: `${pf}\\PowerShell\\7\\pwsh.exe`, args: ['-NoLogo'] },
+      { name: 'Windows PowerShell', commandline: `${sys}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, args: ['-NoLogo'] },
+      { name: 'Command Prompt', commandline: `${sys}\\System32\\cmd.exe`, args: [] },
       { name: 'Git Bash', commandline: `${pf}\\Git\\bin\\bash.exe`, args: ['--login', '-i'] },
       { name: 'WSL', commandline: `${sys}\\System32\\wsl.exe`, args: [] },
     ].filter(p => fs.existsSync(p.commandline));

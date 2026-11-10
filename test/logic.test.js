@@ -94,3 +94,19 @@ test('shells get cwd reporting; agents resume on restore', () => {
   assert.doesNotMatch(cmdline(settings.agentLaunch(s, 'claude', false)), /--continue/);
   assert.doesNotMatch(cmdline(settings.agentLaunch(s, 'codex', true)), /--continue/);
 });
+
+test('model ids get short display names', () => {
+  assert.equal(info.prettyModel('claude-opus-5-5'), 'Opus 5.5');
+  assert.equal(info.prettyModel('claude-sonnet-4-5-20250929'), 'Sonnet 4.5');
+  assert.equal(info.prettyModel('claude-haiku-5-5[1m]'), 'Haiku 5.5 (1M)');
+  assert.equal(info.prettyModel('gpt-5-codex'), 'gpt-5-codex');
+  assert.equal(info.prettyModel(null), null);
+});
+
+test('detected shell profiles follow the default color scheme', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'at-')), 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({ colorScheme: 'Solarized Dark' }));
+  const { settings: s } = settings.load(file);
+  assert.ok(s.profiles.every(p => !p.colorScheme));
+  assert.deepEqual(s.templates, []);
+});

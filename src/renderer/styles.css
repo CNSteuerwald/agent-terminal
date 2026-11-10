@@ -56,7 +56,20 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 .tab-close { padding: 0 5px; opacity: 0; line-height: 1.2; }
 .tab:hover .tab-close, .tab.active .tab-close, .tab-close:focus-visible { opacity: .8; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: 0 0 auto; }
-.dot.working { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+/* Working: a comet arc orbits a breathing core, and a light sweeps along the bottom of the tab. */
+.dot.working { position: relative; background: none; }
+.dot.working::before { content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 30%, color-mix(in srgb, var(--accent) 40%, transparent) 60%, var(--accent));
+  -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px); mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+  animation: spin .9s linear infinite; }
+.dot.working::after { content: ""; position: absolute; inset: 1.5px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 6px var(--accent); animation: breathe 1.8s ease-in-out infinite; }
+.tab.working::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 1px; height: 2px; border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat; background-size: 40% 100%;
+  opacity: .7; animation: sweep 2.2s ease-in-out infinite; pointer-events: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { transform: scale(.6); opacity: .65; } }
+@keyframes sweep { 0% { background-position: -60% 0; } 100% { background-position: 160% 0; } }
 .dot.attention { background: #f5a623; }
 .dot.done { background: #3fb950; box-shadow: 0 0 0 3px #3fb95033; }
 @keyframes pulse { 50% { opacity: .35; } }
@@ -80,7 +93,7 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 .gutter:hover, .gutter:active { background: var(--accent); }
 .group { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .group-body { position: relative; flex: 1 1 0; min-height: 0; }
-.group-body > .pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.group-body > .pane { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--term-bg); }
 /* Stacked panes that aren't showing stay laid out (xterm can still measure) but invisible. */
 .group-body > .pane.inactive { visibility: hidden; pointer-events: none; }
 .term { flex: 1; min-height: 0; padding: 4px 0 0 6px; }
@@ -92,7 +105,15 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 .ptab.active { background: var(--term-bg); border-color: var(--border); color: var(--fg); height: 28px; margin-bottom: -1px; }
 .group.focused .ptab.active { box-shadow: inset 0 2px 0 var(--accent); }
 .ptab-icon { font: 11px/1 ui-monospace, Consolas, monospace; opacity: .75; flex: 0 0 auto; }
-.ptab-icon.working { color: var(--accent); opacity: 1; animation: pulse 1s ease-in-out infinite; }
+.ptab-icon.working { display: inline-block; color: var(--accent); opacity: 1; animation: twinkle 1.6s ease-in-out infinite; }
+@keyframes twinkle {
+  0% { transform: rotate(0) scale(1); text-shadow: 0 0 0 transparent; }
+  50% { transform: rotate(180deg) scale(1.3); text-shadow: 0 0 6px var(--accent); }
+  100% { transform: rotate(360deg) scale(1); text-shadow: 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.working::before, .dot.working::after, .tab.working::after, .ptab-icon.working { animation: none; }
+}
 .ptab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ptab-input { width: 130px; font: inherit; padding: 1px 4px; }
 .ptab-close { flex: 0 0 auto; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-left: -2px; border-radius: 4px; font-size: 14px; line-height: 1; opacity: .55; }
@@ -225,3 +246,53 @@ button:disabled { opacity: .45; cursor: default; }
 #update-status .update-restart:hover { background: none; filter: brightness(1.2); }
 button.danger { border: 1px solid var(--danger); color: var(--danger); padding: 6px 14px; justify-self: start; }
 button.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+/* ---------- zoom (bottom bar) ---------- */
+#zoom { display: flex; align-items: center; gap: 1px; margin-right: 6px; color: var(--muted); font-size: 12px; }
+#zoom button { padding: 1px 7px; font-size: 13px; line-height: 1.2; }
+#zoom-level { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; cursor: default; }
+#zoom #zoom-reset { font-size: 12px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); margin-left: 4px; }
+
+/* ---------- tab hover card ---------- */
+#tab-tip { position: fixed; z-index: 35; width: max-content; max-width: min(420px, 90vw); padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 28px #0007; pointer-events: none; font-size: 12px; animation: tip-in .12s ease-out; }
+@keyframes tip-in { from { opacity: 0; transform: translateY(2px); } }
+.tip-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; font-size: 13px; }
+.tip-head strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tip-state { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.tip-state.working { color: var(--accent); }
+.tip-state.attention { color: #f5a623; }
+.tip-state.done { color: #3fb950; }
+.tip-sub { color: var(--muted); overflow-wrap: anywhere; }
+.tip-label { margin: 8px 0 2px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.tip-row { display: flex; align-items: flex-start; gap: 8px; padding: 3px 4px; border-radius: 4px; }
+.tip-row.focused { background: var(--hover); }
+.tip-icon { width: 18px; flex: 0 0 auto; font: 11px/18px ui-monospace, Consolas, monospace; color: var(--muted); text-align: center; }
+.tip-icon.working { color: var(--accent); }
+.tip-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 18px; }
+.tip-pane small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+.tip-pstate { color: var(--muted); font-size: 11px; line-height: 18px; white-space: nowrap; }
+.tip-pstate.working { color: var(--accent); }
+.tip-pstate.exited { color: var(--danger); }
+.tip-foot { margin-top: 6px; color: var(--muted); font-size: 11px; }
+
+/* ---------- template editor (Settings → Templates) ---------- */
+.tpl-actions { padding: 10px 0 4px; }
+.tpl-card { margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tpl-card.default { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.tpl-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.tpl-head .tpl-name { font-weight: 600; width: 220px; }
+.tpl-head button.secondary, .tpl-head button.danger { padding: 3px 12px; }
+.tpl-badge { color: var(--accent); font-size: 12px; }
+.tpl-preview { display: flex; height: 220px; padding: 10px; background: var(--term-bg); }
+.tpl-preview > * { flex: 1 1 0; }
+.tpl-split { display: flex; min-width: 0; min-height: 0; }
+.tpl-split.split-row { flex-direction: row; }
+.tpl-split.split-col { flex-direction: column; }
+.tpl-group { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px; min-width: 0; min-height: 0; padding: 8px; overflow: auto; border: 1px dashed color-mix(in srgb, var(--fg) 25%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--bg2) 70%, transparent); }
+.tpl-stacked { color: var(--muted); font-size: 11px; }
+.tpl-slot { display: flex; gap: 4px; align-items: center; max-width: 100%; }
+.tpl-slot select { min-width: 0; max-width: 220px; }
+.tpl-x { padding: 0 6px; color: var(--muted); }
+.tpl-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; }
+.tpl-tools button { font-size: 11px; padding: 2px 6px; color: var(--muted); border: 1px solid var(--border); }
+.tpl-tools button:hover { color: var(--fg); border-color: var(--accent); }
