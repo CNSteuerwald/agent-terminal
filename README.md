@@ -124,11 +124,12 @@ npm test
 - Each tab shows (toggle each in **Settings → Tabs**):
   - **Directory**: the tab's folder
   - **Git**: branch, ↑ahead / ↓behind, and number of changed files (✓ when clean)
-  - **What runs in the tab**: the agent and its model, then the terminals, e.g. `✦ Claude Code · Opus 5.5   ›_ 2 terminals` (`+N` when there are more agents)
-  - **Activity dot**:
-    - **Blue, spinning** (with a light sweeping along the tab): the agent is working.
-    - **Green:** the agent finished while you were on another tab.
-    - **Amber:** it rang the bell (needs attention).
+  - **What runs in the tab**: the agent and its model, then the terminals, e.g. `Claude Code · Opus 5.5   ›_ 2 terminals` (`+N` when there are more agents)
+  - **Agent icon** (or a dot for tabs with only terminals), showing the agent's state:
+    - **Animated and glowing** (with a light in the agent's color sweeping along the tab): the agent is working.
+    - **Green badge:** the agent finished while you were on another tab.
+    - **Amber badge, pulsing:** it rang the bell (needs attention).
+    - **Dimmed:** idle.
     - Output caused by your own typing, resizing or switching tabs doesn't count, and nothing counts until you've typed something to that agent.
 - **Hover a tab** for a card with the details: full folder, git status, every pane with its state (working, idle, running, exited) and the agent's current task title, how long the agent has been working, and when it last printed anything.
 - Double-click a tab title to rename it. Middle-click closes it. Drag tabs to reorder.
@@ -151,7 +152,15 @@ Each tab in the sidebar holds a layout of **panes**: terminals and agents, any n
 - **Resize** by dragging the bar between panes, or with `Alt+Shift+Arrows`. **Move focus** between panes with `Alt+Arrows`. `Ctrl+Shift+I` jumps between your terminal and your agent.
 - **Right-click a pane's tab** to rename it, restart it, split it off, move it to a new tab or close it. Double-click renames.
 - **Reopen an agent somewhere else:** right-click an agent's pane tab (Claude Code or any other agent CLI) and pick one of the folders the tab's terminals are in, under **Reopen agent in**. The agent restarts there (✓ marks where it runs now). Sandbox sessions don't offer this: they stay in their sandbox's workspace.
-- Each agent's ✦ tab icon spins while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
+- Each agent's icon on its pane tab animates while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
+
+### Agent icons
+
+Every agent has its own icon and color, shown in the sidebar, on its pane tab, in the hover card and in menus. While an agent works, its icon comes alive in its own way: the spark spins and twinkles, the robot looks around and its antenna blinks, the orbit's moon circles, the equalizer bounces, the rocket's flame flickers, the eye glances about, the cat tilts its head and blinks, and so on.
+
+- **Change an agent's look** in **Settings → Agents**: click its icon to pick from 14 icons (spark, orbit, robot, cube, equalizer, gear, atom, ghost, flame, terminal, rocket, eye, pulse, cat), choose one of the colors or any custom color, and preview how it looks idle, working, needing you and finished. **Reset to default icon and color** undoes it.
+- Defaults: Claude Code is a coral spark, Copilot a purple robot, Codex a green cube, Gemini a blue orbit, OpenCode an amber terminal. Agents you add yourself start as a spark in the accent color.
+- Turn the motion off in **Settings → Appearance → Animate agent icons** (working icons still glow). Windows' "reduce animations" setting also stops it.
 - New tabs start as a terminal plus your default agent, arranged per **Settings → General → New tab layout** (agent right / left / below / above, or both as tabs in one group), unless you pick a template.
 - **Templates** (**Settings → Templates**) save a starting layout: which shells and agents a new tab opens with and where they sit, e.g. Claude Code on the left and PowerShell on the right. Split a box right or down, stack panes as tabs, pick what each pane runs, and drag the dividers to size them. **Save current tab as template** captures a tab you've already arranged. Choose one under **New tabs open with** to make it the default; all templates are also in the **+ New tab group** menu and the palette (*New tab from template: …*).
 - **Customize** in **Settings → Panes**: where new panes open, the snap preview and its animation, how much of a pane's edge counts as "split here" (vs. "stack as a tab"), and whether close buttons always show.
@@ -258,6 +267,7 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "snapPreview": true, "paneAnimations": true,
   "snapEdge": 30,                          // % of a pane that counts as its edge when dropping
   "paneCloseButton": "always",             // "always" | "hover"
+  "iconAnimations": true,                  // agent icons animate while their agent works
   "agentPaneSize": 50,                     // percent
   "colorScheme": "Campbell",               // every terminal and the app's own colors
   "fontFace": "'Cascadia Mono NF', 'Cascadia Mono', Consolas, monospace",
@@ -270,7 +280,7 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   // Agents merge with the built-ins by id. Add your own or change a command.
   "agents": [
     { "id": "claude", "command": "claude --model opus" },
-    { "id": "aider", "name": "Aider", "command": "aider --no-auto-commits" }
+    { "id": "aider", "name": "Aider", "command": "aider --no-auto-commits", "icon": "cat", "iconColor": "#3FB950" }
   ],
 
   // Shell profiles merge with the detected ones by name. "hidden": true removes one.
