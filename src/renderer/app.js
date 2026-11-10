@@ -1,5 +1,5 @@
 'use strict';
-/* global Terminal, FitAddon, SearchAddon, WebLinksAddon, Keys, api */
+/* global Terminal, FitAddon, SearchAddon, WebLinksAddon, Keys, AgentIcons, api */
 
 const $ = s => document.querySelector(s);
 function el(tag, props = {}, ...children) {
@@ -158,6 +158,25 @@ function xtermTheme(name) {
 // plus optional cwd, title and resume.
 const agentDef = id => S.agents.find(a => a.id === id);
 const PANE_ICONS = { shell: '›_', agent: '✦', sbx: '⬢', sandbox: '⧉' };
+
+// ---------------------------------------------------------------- agent icons
+// Each agent has an icon (icons.js) and a color, chosen in Settings → Agents.
+const HEX_COLOR = /^#[0-9a-f]{3,8}$/i;
+function agentLook(agentId) {
+  const a = agentDef(agentId);
+  return { icon: AgentIcons.has(a?.icon) ? a.icon : 'spark', color: HEX_COLOR.test(a?.iconColor || '') ? a.iconColor : null };
+}
+const paneLook = p => agentLook(p.kind === 'sandbox' ? p.sandbox?.agent : p.agentId);
+
+// state: '' | 'idle' | 'working' | 'attention' | 'done'. A null color inherits --ai-color (else the accent).
+function iconEl({ icon, color }, state = '', label = '') {
+  const span = el('span', { className: `agent-icon ai-${icon} ${state}`.trim() });
+  span.innerHTML = AgentIcons.svg(icon); // static markup from icons.js, never user text
+  if (color) span.style.setProperty('--ai-color', color);
+  span.style.setProperty('--ai-phase', `-${Math.round(performance.now() % 2400)}ms`); // see styles.css
+  if (label) { span.setAttribute('role', 'img'); span.ariaLabel = label; } else span.ariaHidden = 'true';
+  return span;
+}
 
 class Pane {
   constructor(tab, spec) {
@@ -737,7 +756,9 @@ function paneTab(tab, p) {
 function updatePaneTab(p) {
   const t = p.tabEl;
   if (!t) return;
-  t.querySelector('.ptab-icon').textContent = PANE_ICONS[p.kind];
+  const icon = t.querySelector('.ptab-icon');
+  if (p.isAgent) icon.replaceChildren(iconEl(paneLook(p), Date.now() - p.lastWork < 2000 ? 'working' : ''));
+  else icon.textContent = PANE_ICONS[p.kind];
   const title = t.querySelector('.ptab-title');
   if (title) title.textContent = p.label();
   t.title = [p.name(), p.cwd, p.title].filter(Boolean).join('\n');
@@ -804,7 +825,7 @@ function showAddMenu(tab, g, anchor) {
     ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => add({ kind: 'shell', profile: p.name }) })),
     '-', 'Agent',
     tab.type === 'sandbox' && { label: `Sandbox: ${tab.sandbox.name}`, run: () => add({ kind: 'sandbox', sandbox: tab.sandbox }) },
-    ...S.agents.map(a => ({ label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
+    ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
     '-', 'Open new panes as', seg,
   ]);
 }
@@ -1076,7 +1097,7 @@ function panesLine(tab) {
   const lead = primaryAgent(tab) || agents[0];
   const parts = [];
   if (tab.type === 'sandbox') parts.push(`⧉ ${[tab.sandbox.agent || 'sandbox', tab.info.status].filter(Boolean).join(' · ')}`);
-  else if (lead) parts.push(`✦ ${[lead.name(), tab.info.modelLabel].filter(Boolean).join(' · ')}${agents.length > 1 ? ` +${agents.length - 1}` : ''}`);
+  else if (lead) parts.push(`${[lead.name(), tab.info.modelLabel].filter(Boolean).join(' · ')}${agents.length > 1 ? ` +${agents.length - 1}` : ''}`);
   if (shells.length) parts.push(shells.length === 1 ? `›_ ${shells[0].profile}` : `›_ ${shells.length} terminals`);
   return parts.join('  ');
 }
@@ -1109,9 +1130,12 @@ function tabItem(tab) {
   const title = el('span', { className: 'tab-title', textContent: tabTitle(tab) });
   title.ondblclick = () => startRename(tab, title);
   const state = tabState(tab);
-  const marker = isSbx
-    ? el('span', { className: 'sbx-icon', textContent: '⬢', ariaHidden: 'true' })
-    : el('span', { className: `dot ${state[0]}`, role: 'img', ariaLabel: state[1] });
+  const lead = !isSbx && (primaryAgent(tab) || tabPanes(tab).find(p => p.isAgent));
+  const look = lead && paneLook(lead);
+  if (look?.color) item.style.setProperty('--ai-color', look.color); // the working sweep takes the agent's color
+  const marker = isSbx ? el('span', { className: 'sbx-icon', textContent: '⬢', ariaHidden: 'true' })
+    : look ? iconEl(look, state[0] || 'idle', state[1])
+      : el('span', { className: `dot ${state[0]}`, role: 'img', ariaLabel: state[1] });
   item.append(el('div', { className: 'tab-head' }, marker, title, close), el('div', { className: 'metas' }, ...tabMetas(tab)));
   item.onclick = () => activate(tab);
   item.onauxclick = e => { if (e.button === 1) closeTab(tab); };
@@ -1195,7 +1219,9 @@ function paneState(p, now) {
 function tipContent(tab) {
   const now = Date.now();
   const [cls, label] = tabState(tab);
+  const lead = tab.type !== 'sbx' && (primaryAgent(tab) || tabPanes(tab).find(p => p.isAgent));
   const head = el('div', { className: 'tip-head' },
+    lead && iconEl(paneLook(lead), cls || 'idle'),
     el('strong', { textContent: tabTitle(tab) }),
     el('span', { className: `tip-state ${cls}`, textContent: cls === 'working' && tab.busySince ? `${label} · ${ago(now - tab.busySince)}` : label }));
   if (tab.type === 'sbx') {
@@ -1215,9 +1241,11 @@ function tipContent(tab) {
       const [pc, pl] = paneState(p, now);
       const model = p === primaryAgent(tab) && tab.info.modelLabel;
       // Agents put their current task in the terminal title (Claude Code does); shells, their folder.
-      const detail = p.isAgent ? p.title : p.cwd !== tab.cwd && shortPath(p.cwd);
+      // (A title that's just the launching shell's path, e.g. cmd.exe, says nothing.)
+      const detail = p.isAgent ? !/\.exe$/i.test(p.title || '') && p.title : p.cwd !== tab.cwd && shortPath(p.cwd);
       return el('div', { className: 'tip-row' + (p === tab.focused ? ' focused' : '') },
-        el('span', { className: `tip-icon ${pc}`, textContent: PANE_ICONS[p.kind], ariaHidden: 'true' }),
+        p.isAgent ? el('span', { className: 'tip-icon' }, iconEl(paneLook(p), pc))
+          : el('span', { className: `tip-icon ${pc}`, textContent: PANE_ICONS[p.kind], ariaHidden: 'true' }),
         el('span', { className: 'tip-pane' },
           el('span', { textContent: [p.label(), model].filter(Boolean).join(' · ') }),
           detail && el('small', { textContent: detail })),
@@ -1278,7 +1306,7 @@ setInterval(() => {
   else if (tipTab) showTip(tipTab); // keep its timers and pane states live
   // Each agent's own tab icon pulses while that agent works.
   const now = Date.now();
-  for (const p of tabPanes(active)) p.tabEl?.querySelector('.ptab-icon').classList.toggle('working', p.isAgent && now - p.lastWork < 2000);
+  for (const p of tabPanes(active)) p.tabEl?.querySelector('.ptab-icon .agent-icon')?.classList.toggle('working', isWorking(p.tab) && now - p.lastWork < 2000);
 }, 500);
 
 async function refreshInfo(list = tabs) {
@@ -1338,7 +1366,9 @@ function showMenu(anchor, items) {
     if (it instanceof Node) return it;
     if (it === '-') return el('hr');
     if (typeof it === 'string') return el('div', { className: 'menu-header', textContent: it });
-    const b = el('button', { textContent: it.label, role: 'menuitem' });
+    const b = it.icon
+      ? el('button', { className: 'has-icon', role: 'menuitem' }, it.icon, el('span', { textContent: it.label }))
+      : el('button', { textContent: it.label, role: 'menuitem' });
     b.onclick = () => { menu.hidden = true; it.run(); };
     return b;
   }));
@@ -1357,7 +1387,7 @@ $('#new-tab-menu').onclick = e => showMenu(e.currentTarget, [
   '-', 'Shell',
   ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => newTab({ profile: p.name }) })),
   '-', 'Agent',
-  ...S.agents.map(a => ({ label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
+  ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
   '-', 'Template',
   ...S.templates.map(t => ({ label: t.name + (t.name === S.defaultTemplate ? ' (default)' : ''), run: () => newTab({ template: t.name }) })),
   { label: 'Edit templates…', run: () => openSettings('Templates') },
@@ -1600,7 +1630,8 @@ function templateCard(tpl) {
       commit();
     });
     pick.ariaLabel = 'Pane runs';
-    return el('div', { className: 'tpl-slot' }, pick,
+    return el('div', { className: 'tpl-slot' },
+      p.kind === 'agent' ? iconEl(agentLook(p.agentId)) : el('span', { className: 'tpl-shell', textContent: '›_', ariaHidden: 'true' }), pick,
       total > 1 && button('×', 'Remove this pane', () => { root = Layout.removePane(root, p); commit(); }, 'tpl-x'));
   };
   const build = node => {
@@ -1642,11 +1673,65 @@ function templateCard(tpl) {
     el('div', { className: 'tpl-preview' }, build(root)));
 }
 
+// ---------------------------------------------------------------- agent icon picker (Settings → Agents)
+const ICON_COLORS = ['#D97757', '#F5A623', '#E5C07B', '#3FB950', '#10A37F', '#00B7C3', '#4C8DF6', '#8B5CF6', '#E3008C', '#E74856', '#9D9D9D'];
+
+function iconButton(a) {
+  const look = agentLook(a.id);
+  const b = el('button', { className: 'icon-pick', type: 'button', title: `Change ${a.name}'s icon`, ariaLabel: `Change ${a.name}'s icon` }, iconEl(look, 'working'));
+  if (look.color) b.style.setProperty('--ai-color', look.color);
+  b.onclick = () => showIconPicker(a, b);
+  return b;
+}
+
+// A grid of every icon (all animating, so you see how each one works) plus colors and a state preview.
+// Picks save immediately; undefined drops the key from settings.json, which restores the built-in default.
+function showIconPicker(a, anchor) {
+  const look = agentLook(a.id);
+  const box = el('div', { className: 'icon-picker' });
+  const paint = c => { if (c) box.style.setProperty('--ai-color', c); else box.style.removeProperty('--ai-color'); };
+  paint(look.color);
+  const save = patch => set('agents', [{ id: a.id, ...patch }]);
+  const grid = el('div', { className: 'icon-grid', role: 'radiogroup', ariaLabel: `Icon for ${a.name}` },
+    ...AgentIcons.names.map(name => {
+      const b = el('button', { className: 'icon-choice' + (name === look.icon ? ' selected' : ''), type: 'button', role: 'radio', title: AgentIcons.label(name), ariaLabel: AgentIcons.label(name) },
+        iconEl({ icon: name }, 'working'));
+      b.setAttribute('aria-checked', String(name === look.icon));
+      b.onclick = () => {
+        for (const x of grid.children) { x.classList.toggle('selected', x === b); x.setAttribute('aria-checked', String(x === b)); }
+        states.replaceChildren(...stateSamples(name));
+        save({ icon: name });
+      };
+      return b;
+    }));
+  const colors = el('div', { className: 'icon-colors', role: 'radiogroup', ariaLabel: 'Icon color' },
+    ...ICON_COLORS.map(c => {
+      const b = el('button', { className: 'swatch' + (c.toLowerCase() === look.color?.toLowerCase() ? ' selected' : ''), type: 'button', title: c, ariaLabel: `Color ${c}` });
+      b.style.background = c;
+      b.onclick = () => { for (const x of colors.children) x.classList.toggle('selected', x === b); paint(c); save({ iconColor: c }); };
+      return b;
+    }));
+  const picker = el('input', { type: 'color', value: look.color || '#4C8DF6', ariaLabel: 'Custom icon color' });
+  picker.oninput = () => paint(picker.value);              // live preview while dragging
+  picker.onchange = () => save({ iconColor: picker.value }); // save once the color is chosen
+  const custom = el('label', { className: 'menu-custom' }, 'Custom color…', picker);
+  const stateSamples = name => [['idle', 'Idle'], ['working', 'Working'], ['attention', 'Needs you'], ['done', 'Finished']]
+    .map(([st, l]) => el('span', {}, iconEl({ icon: name }, st), l));
+  const states = el('div', { className: 'icon-states' }, ...stateSamples(look.icon));
+  box.append(grid, el('div', { className: 'menu-header', textContent: 'Color' }), colors, custom,
+    el('div', { className: 'menu-header', textContent: 'Preview' }), states);
+  showMenu(anchor, [
+    `${a.name}: icon`, box, '-',
+    { label: 'Reset to default icon and color', run: () => save({ icon: undefined, iconColor: undefined }) },
+  ]);
+}
+
 // ---------------------------------------------------------------- settings UI
 let settingsSection = 'General';
 
 function openSettings(section) {
   if (section) settingsSection = section;
+  hideTip();
   $('#settings').hidden = false;
   renderSettings();
   $('#settings-nav button.active')?.focus();
@@ -1715,6 +1800,8 @@ const SECTIONS = {
     field('Color scheme', select(S.colorScheme, schemeOptions(), v => set('colorScheme', v)),
       'Every terminal and the app itself. A light scheme gives a light app. Also in the palette: Color scheme: …'),
     swatches(S.colorScheme),
+    field('Animate agent icons', toggle(S.iconAnimations, v => set('iconAnimations', v)),
+      'Each agent\'s icon moves in its own way while the agent works. Off: icons still glow, without motion. Pick icons in Settings → Agents.'),
     field('Font face', input(S.fontFace, v => set('fontFace', v))),
     field('Font size', input(S.fontSize, v => set('fontSize', clamp(v, 6, 72)), 'number'), 'Ctrl+scroll or Ctrl+= / Ctrl+- changes it temporarily.'),
     field('Cursor shape', select(S.cursorShape, ['bar', 'block', 'underline'], v => set('cursorShape', v))),
@@ -1730,10 +1817,11 @@ const SECTIONS = {
         el('td', { className: 'muted', textContent: [p.commandline, ...(p.args || [])].join(' ') })))),
   ],
   Agents: () => [
-    el('p', { className: 'note', textContent: 'The agent pane runs this command in your shell, exactly as if you typed it. Add flags such as --model or --continue here.' }),
+    el('p', { className: 'note', textContent: 'The agent pane runs this command in your shell, exactly as if you typed it. Add flags such as --model or --continue here. Click an icon to give the agent its own look and color; it animates in the sidebar and on its pane while the agent works.' }),
     el('table', { className: 'list' },
-      el('tr', {}, el('th', { textContent: 'Agent' }), el('th', { textContent: 'Command' })),
+      el('tr', {}, el('th', { textContent: 'Icon' }), el('th', { textContent: 'Agent' }), el('th', { textContent: 'Command' })),
       ...S.agents.map(a => el('tr', {},
+        el('td', {}, iconButton(a)),
         el('td', { textContent: a.name }),
         el('td', {}, Object.assign(input(a.command, v => v.trim() && set('agents', [{ id: a.id, command: v.trim() }])), { className: 'command' }))))),
   ],
@@ -1792,17 +1880,18 @@ async function runWizard() {
       tabMetadata: { ...S.tabMetadata }, sandboxEnabled: S.sandboxEnabled && detect.sbx,
     };
     let step = 0;
-    const radio = (group, value, current, label, sub, onPick, disabled) => {
+    const radio = (group, value, current, label, sub, onPick, disabled, icon) => {
       const r = el('input', { type: 'radio', name: group, value, checked: value === current, disabled });
       r.onchange = () => onPick(value);
       return el('label', { className: 'choice' + (disabled ? ' disabled' : '') }, r,
-        el('span', {}, el('strong', { textContent: label }), sub && el('small', { textContent: sub })));
+        el('span', {}, el('strong', {}, icon || null, label), sub && el('small', { textContent: sub })));
     };
     const steps = [
       ['Choose your default agent', 'Each tab runs this agent CLI next to your shell, exactly as it looks in a normal terminal. You can switch per tab later.', () => [
         el('div', { className: 'choices' },
           ...S.agents.map(a => radio('agent', a.id, d.defaultAgent, a.name,
-            installed(a.id) ? `Installed · runs "${a.command}"` : `Not found on PATH ("${a.command}")`, v => { d.defaultAgent = v; })),
+            installed(a.id) ? `Installed · runs "${a.command}"` : `Not found on PATH ("${a.command}")`, v => { d.defaultAgent = v; }, false,
+            iconEl(agentLook(a.id), 'working'))),
           radio('agent', '', d.defaultAgent, 'None', 'Tabs open with only a shell', v => { d.defaultAgent = v; })),
       ]],
       ['Shell and starting folder', 'The shell shown beside the agent, and the folder new tabs open in.', () => [
@@ -1923,6 +2012,7 @@ function apply(payload) {
   $('#app').className = [S.tabLayout === 'horizontal' ? 'horizontal' : 'vertical', !S.sidebarVisible && 'sidebar-hidden'].filter(Boolean).join(' ');
   document.documentElement.style.setProperty('--sidebar-w', `${S.sidebarWidth}px`);
   document.body.dataset.closeButtons = S.paneCloseButton;
+  document.body.dataset.iconAnim = S.iconAnimations ? 'on' : 'off';
   for (const t of tabs) for (const p of tabPanes(t)) p.applySettings();
   renderZoom();
   syncSbxTab();

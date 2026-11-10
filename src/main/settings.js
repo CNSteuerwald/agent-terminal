@@ -10,12 +10,13 @@ const IS_WIN = process.platform === 'win32';
 
 // resumeArgs: appended to the command when a tab is restored after restarting the app,
 // so the agent picks up its most recent conversation in that folder.
+// icon / iconColor: the agent's look in tabs and menus (renderer/icons.js); changeable in Settings → Agents.
 const DEFAULT_AGENTS = [
-  { id: 'claude', name: 'Claude Code', command: 'claude', resumeArgs: '--continue' },
-  { id: 'copilot', name: 'GitHub Copilot CLI', command: 'copilot', resumeArgs: '--continue' },
-  { id: 'codex', name: 'OpenAI Codex', command: 'codex' },
-  { id: 'gemini', name: 'Gemini CLI', command: 'gemini' },
-  { id: 'opencode', name: 'OpenCode', command: 'opencode', resumeArgs: '--continue' },
+  { id: 'claude', name: 'Claude Code', command: 'claude', resumeArgs: '--continue', icon: 'spark', iconColor: '#D97757' },
+  { id: 'copilot', name: 'GitHub Copilot CLI', command: 'copilot', resumeArgs: '--continue', icon: 'robot', iconColor: '#8B5CF6' },
+  { id: 'codex', name: 'OpenAI Codex', command: 'codex', icon: 'cube', iconColor: '#10A37F' },
+  { id: 'gemini', name: 'Gemini CLI', command: 'gemini', icon: 'orbit', iconColor: '#4C8DF6' },
+  { id: 'opencode', name: 'OpenCode', command: 'opencode', resumeArgs: '--continue', icon: 'terminal', iconColor: '#F5A623' },
 ];
 
 // Shell integration: report the current folder at every prompt (OSC 9;9, the Windows Terminal
@@ -49,6 +50,7 @@ const DEFAULTS = {
   paneAnimations: true,
   snapEdge: 30,                // % of a pane counted as its edge when dropping (split vs. stack)
   paneCloseButton: 'always',   // always | hover
+  iconAnimations: true,        // agent icons animate while their agent works
   colorScheme: 'Campbell',
   // Nerd Fonts first so oh-my-posh/starship prompt glyphs render; missing fonts are skipped.
   fontFace: "'CaskaydiaCove Nerd Font Mono', 'Cascadia Mono NF', 'FiraCode Nerd Font Mono', 'JetBrainsMono Nerd Font Mono', 'Cascadia Mono', Consolas, Menlo, monospace",

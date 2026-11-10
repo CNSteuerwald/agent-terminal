@@ -137,7 +137,7 @@ body.dragging-pane, body.dragging-pane * { cursor: grabbing !important; }
 .popup .menu-seg button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 /* ---------- popups ---------- */
-.popup { position: fixed; z-index: 20; min-width: 220px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px #0006; }
+.popup { position: fixed; z-index: 38; /* above overlays: menus also open from Settings */ min-width: 220px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px #0006; }
 .popup .menu-header { color: var(--muted); font-size: 11px; padding: 6px 10px 2px; text-transform: uppercase; letter-spacing: .04em; }
 .popup button { display: block; width: 100%; text-align: left; }
 .popup hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
@@ -296,3 +296,102 @@ button.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transpar
 .tpl-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; }
 .tpl-tools button { font-size: 11px; padding: 2px 6px; color: var(--muted); border: 1px solid var(--border); }
 .tpl-tools button:hover { color: var(--fg); border-color: var(--accent); }
+
+/* ---------- agent icons (icons.js) ----------
+   Each agent has an icon and a color (Settings → Agents). Parts animate only while the agent works.
+   Every loop length divides 2.4s and --ai-phase is set from the clock when an icon is created, so
+   icons rebuilt by a re-render pick up exactly where the old ones were: no jumps. */
+.agent-icon { position: relative; display: inline-grid; place-items: center; flex: 0 0 auto; width: var(--ai-size, 14px); height: var(--ai-size, 14px); color: var(--ai-color, var(--accent)); line-height: 0; }
+.agent-icon svg { width: 100%; height: 100%; overflow: visible; transition: filter .3s; }
+.agent-icon svg * { transform-box: view-box; transform-origin: 8px 8px; }
+.agent-icon.idle { opacity: .72; }
+.agent-icon.working svg { filter: drop-shadow(0 0 2.5px color-mix(in srgb, var(--ai-color, var(--accent)) 75%, transparent)); }
+.agent-icon .p-tw { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.agent-icon .p-f1 { opacity: .95; } .agent-icon .p-f2 { opacity: .6; } .agent-icon .p-f3 { opacity: .32; }
+.agent-icon .p-bar, .agent-icon .p-flicker, .agent-icon .p-ember { transform-box: fill-box; transform-origin: 50% 100%; }
+.agent-icon .p-blink { transform-box: fill-box; transform-origin: center; }
+.agent-icon .p-exhaust { transform-box: fill-box; transform-origin: 50% 0; opacity: 0; }
+
+.agent-icon.working .p-spin { animation: ai-spin 1.2s cubic-bezier(.65, 0, .35, 1) var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-tw1 { animation: ai-twinkle 1.2s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-tw2 { animation: ai-twinkle 1.2s ease-in-out calc(var(--ai-phase, 0s) - .6s) infinite; }
+.agent-icon.working .p-orbit { animation: ai-rotate 1.2s linear var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-core { animation: ai-breathe 1.2s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-look { animation: ai-look 2.4s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-beacon { animation: ai-beacon .6s steps(1) var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-face { animation: ai-face 1.2s linear var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-f2 { animation-delay: calc(var(--ai-phase, 0s) - .4s); }
+.agent-icon.working .p-f3 { animation-delay: calc(var(--ai-phase, 0s) - .8s); }
+.agent-icon.working .p-bar { animation: ai-eq .6s ease-in-out var(--ai-phase, 0s) infinite alternate; }
+.agent-icon.working .p-b2 { animation-delay: calc(var(--ai-phase, 0s) - .3s); }
+.agent-icon.working .p-b3 { animation-delay: calc(var(--ai-phase, 0s) - .45s); }
+.agent-icon.working .p-b4 { animation-delay: calc(var(--ai-phase, 0s) - .15s); }
+.agent-icon.working .p-gear { animation: ai-rotate 2.4s linear var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-atom { animation: ai-rotate 2.4s linear var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-float { animation: ai-float 1.2s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-blink { animation: ai-blink 2.4s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-flicker { animation: ai-flicker .6s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-ember { animation: ai-ember .48s ease-in-out var(--ai-phase, 0s) infinite alternate; }
+.agent-icon.working .p-cursor { animation: ai-beacon .6s steps(1) var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-nudge { animation: ai-nudge 1.2s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-lift { animation: ai-lift 1.2s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-exhaust { opacity: 1; animation: ai-exhaust .24s ease-in-out var(--ai-phase, 0s) infinite alternate; }
+.agent-icon.working .p-pupil { animation: ai-gaze 2.4s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-blinkall { animation: ai-blink 2.4s ease-in-out var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-trace { stroke-dasharray: 28 72; animation: ai-trace 1.2s linear var(--ai-phase, 0s) infinite; }
+.agent-icon.working .p-tilt { animation: ai-tilt 2.4s ease-in-out var(--ai-phase, 0s) infinite; }
+
+@keyframes ai-spin { 0% { transform: rotate(0) scale(1); } 50% { transform: rotate(45deg) scale(.78); } 100% { transform: rotate(90deg) scale(1); } }
+@keyframes ai-twinkle { 0%, 100% { opacity: 0; transform: scale(.2); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes ai-rotate { to { transform: rotate(360deg); } }
+@keyframes ai-breathe { 50% { transform: scale(.78); } }
+@keyframes ai-look { 0%, 15%, 90%, 100% { transform: translateX(0); } 25%, 45% { transform: translateX(-1.4px); } 55%, 80% { transform: translateX(1.4px); } }
+@keyframes ai-beacon { 50% { opacity: .25; } }
+@keyframes ai-face { 0%, 100% { opacity: .95; } 33% { opacity: .6; } 66% { opacity: .32; } }
+@keyframes ai-eq { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+@keyframes ai-float { 50% { transform: translateY(-1.6px); } }
+@keyframes ai-blink { 0%, 86%, 100% { transform: scaleY(1); } 92% { transform: scaleY(.1); } }
+@keyframes ai-flicker { 0%, 100% { transform: scale(1, 1) skewX(0); } 30% { transform: scale(.94, 1.08) skewX(-3deg); } 65% { transform: scale(1.04, .95) skewX(2deg); } }
+@keyframes ai-ember { from { opacity: .35; transform: scale(.85); } to { opacity: .8; transform: scale(1.08); } }
+@keyframes ai-nudge { 50% { transform: translateX(1.2px); } }
+@keyframes ai-lift { 50% { transform: translateY(-1.2px); } }
+@keyframes ai-exhaust { from { transform: scaleY(.6); } to { transform: scaleY(1.25); } }
+@keyframes ai-gaze { 0%, 100% { transform: translate(0, 0); } 20% { transform: translate(-1.8px, -.6px); } 45% { transform: translate(1.8px, -.6px); } 70% { transform: translate(1px, 1px); } }
+@keyframes ai-trace { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes ai-tilt { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-9deg); } 50% { transform: rotate(0); } 75% { transform: rotate(9deg); } }
+
+/* Status badges on the sidebar icon. */
+.agent-icon.attention::after, .agent-icon.done::after { content: ""; position: absolute; right: -3px; top: -3px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+.agent-icon.attention::after { background: #f5a623; animation: ai-ping 1.2s ease-out infinite; }
+.agent-icon.done::after { background: #3fb950; }
+@keyframes ai-ping { 0% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 2px #f5a62399; } 100% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 7px #f5a62300; } }
+
+body[data-icon-anim="off"] .agent-icon *, body[data-icon-anim="off"] .agent-icon::after { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .agent-icon *, .agent-icon::after { animation: none !important; } }
+
+/* Where icons appear. */
+.tab-head .agent-icon { --ai-size: 15px; }
+.tab.working::after { background-image: linear-gradient(90deg, transparent, var(--ai-color, var(--accent)), transparent); }
+.ptab-icon:has(.agent-icon) { opacity: 1; display: inline-grid; }
+.tip-head { align-items: center; }
+.tip-head .agent-icon { --ai-size: 18px; }
+.tip-icon .agent-icon { --ai-size: 15px; margin-top: 1px; }
+.popup button.has-icon { display: flex; align-items: center; gap: 8px; }
+.tpl-slot .agent-icon { --ai-size: 16px; }
+.tpl-shell { width: 16px; text-align: center; font: 11px ui-monospace, Consolas, monospace; color: var(--muted); }
+.choice strong { display: flex; align-items: center; gap: 8px; }
+
+/* Settings → Agents: icon button and picker. */
+.icon-pick { display: grid; place-items: center; width: 36px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 7px; }
+.icon-pick:hover { border-color: var(--ai-color, var(--accent)); }
+.icon-grid { display: grid; grid-template-columns: repeat(7, 38px); gap: 4px; padding: 4px 8px 6px; }
+.popup .icon-grid .icon-choice { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid transparent; border-radius: 8px; }
+.icon-grid .agent-icon { --ai-size: 22px; }
+.popup .icon-grid .icon-choice:hover { background: var(--hover); border-color: var(--border); }
+.popup .icon-grid .icon-choice.selected { border-color: var(--ai-color, var(--accent)); background: color-mix(in srgb, var(--ai-color, var(--accent)) 14%, transparent); }
+.icon-colors { display: grid; grid-template-columns: repeat(11, 20px); gap: 5px; padding: 4px 10px 6px; }
+.popup .icon-colors .swatch { display: block; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid #0003; }
+.popup .icon-colors .swatch.selected { outline: 2px solid var(--fg); outline-offset: 1px; }
+.icon-states { display: flex; gap: 18px; align-items: flex-end; padding: 6px 12px 8px; color: var(--muted); font-size: 11px; }
+.icon-states span { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.icon-states .agent-icon { --ai-size: 22px; }
