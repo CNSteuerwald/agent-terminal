@@ -14,7 +14,7 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 ## Install (for the team)
 
 1. Make sure you can see [CNSteuerwald/agent-terminal](https://github.com/CNSteuerwald/agent-terminal) (it's private; ask to be added as a collaborator).
-2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. That's the only file you need. The release's other two files are for auto-update. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
+2. Download `Agent-Terminal-<version>.zip` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest), extract it, and run `Agent-Terminal-Setup-<version>.exe` from it to install. The zip's other two files are for auto-update and can be ignored. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
 3. Windows may show **"Windows protected your PC"** because the installer isn't code-signed yet. Click **More info → Run anyway**.
 
 ### Updating
@@ -45,7 +45,7 @@ Each release has three files, and auto-update needs all of them:
 
 | File | What it's for |
 |---|---|
-| `Agent-Terminal-Setup-<version>.exe` | The installer. Teammates download this, and the updater installs it. |
+| `Agent-Terminal-Setup-<version>.exe` | The installer. Teammates run this from the zip, and the updater installs it. |
 | `latest.yml` | Tells installed copies which version is newest and where its installer is. Without it, updates stop. |
 | `Agent-Terminal-Setup-<version>.exe.blockmap` | Lets the updater download only the parts that changed since your installed version, instead of the whole ~125 MB installer. Without it, updates fall back to the full download. |
 
