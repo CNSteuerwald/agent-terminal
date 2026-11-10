@@ -993,14 +993,17 @@ function setFontDelta(d) {
 }
 
 // Bottom bar: terminal zoom relative to the font size in settings, with a reset when it differs.
+const ZOOM_LEVELS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200];
 function renderZoom() {
   const size = clamp(S.fontSize + fontDelta, 6, 72);
-  $('#zoom-level').textContent = `${Math.round(size / S.fontSize * 100)}%`;
+  const pct = Math.round(size / S.fontSize * 100);
+  // Ctrl+scroll moves 1px at a time, which can land between presets: list that level too.
+  const levels = [...new Set([...ZOOM_LEVELS, pct])].sort((a, b) => a - b);
+  $('#zoom-level').replaceChildren(...levels.map(l => el('option', { value: l, textContent: `${l}%`, selected: l === pct })));
   $('#zoom-level').title = `Font ${size}px (default ${S.fontSize}px, set in Settings → Appearance). Ctrl+scroll also zooms.`;
   $('#zoom-reset').hidden = fontDelta === 0;
 }
-$('#zoom-in').onclick = () => setFontDelta(fontDelta + 1);
-$('#zoom-out').onclick = () => setFontDelta(fontDelta - 1);
+$('#zoom-level').onchange = e => setFontDelta(Math.round(S.fontSize * e.target.value / 100) - S.fontSize);
 $('#zoom-reset').onclick = () => setFontDelta(0);
 
 

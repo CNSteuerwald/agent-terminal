@@ -156,7 +156,7 @@ Each tab in the sidebar holds a layout of **panes**: terminals and agents, any n
 - **Templates** (**Settings → Templates**) save a starting layout: which shells and agents a new tab opens with and where they sit, e.g. Claude Code on the left and PowerShell on the right. Split a box right or down, stack panes as tabs, pick what each pane runs, and drag the dividers to size them. **Save current tab as template** captures a tab you've already arranged. Choose one under **New tabs open with** to make it the default; all templates are also in the **+ New tab group** menu and the palette (*New tab from template: …*).
 - **Customize** in **Settings → Panes**: where new panes open, the snap preview and its animation, how much of a pane's edge counts as "split here" (vs. "stack as a tab"), and whether close buttons always show.
 - Layouts, including splits, sizes, stacked tabs and pane names, are saved and reopen with your tabs.
-- **Zoom:** Ctrl+scroll over a terminal, `Ctrl+=` / `Ctrl+-`, or the **− / +** in the bottom bar. The bottom bar shows the zoom level against your font size in settings, and a **Reset** button (or `Ctrl+0`) appears whenever you're not at 100%.
+- **Zoom:** Ctrl+scroll over a terminal, `Ctrl+=` / `Ctrl+-`, or the zoom dropdown in the bottom bar (50% to 200%, relative to your font size in settings), and a **Reset** button (or `Ctrl+0`) appears whenever you're not at 100%.
 - When a process exits, press **Enter** in its pane to restart it.
 - In the agent pane, `Shift+Enter` sends a newline (Meta+Enter) instead of submitting, which Claude Code and most agent TUIs understand.
 
