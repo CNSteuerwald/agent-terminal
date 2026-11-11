@@ -366,6 +366,8 @@ class Pane {
       // Agents only work after you give them something: startup banners and resumed history don't count.
       this.armed = false;
       this.ptyId = id;
+      // Resizes during the await were dropped (no ptyId yet); otherwise the shell keeps the old row count.
+      api.resize(id, this.term.cols, this.term.rows);
       panes.set(id, this);
       seenPtys.add(id);
       const buffered = pending.get(id) || [];
