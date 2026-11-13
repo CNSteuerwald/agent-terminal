@@ -154,10 +154,11 @@ function xtermTheme(name) {
 
 // ---------------------------------------------------------------- panes
 // A pane runs one process: a shell, an agent CLI, the sbx dashboard, or a sandbox session.
-// spec: { kind: 'shell', profile } | { kind: 'agent', agentId } | { kind: 'sbx' } | { kind: 'sandbox', sandbox },
+// spec: { kind: 'shell', profile } | { kind: 'agent', agentId } | { kind: 'command', command } (a command tab's name)
+//   | { kind: 'sbx' } | { kind: 'sandbox', sandbox },
 // plus optional cwd, title and resume.
 const agentDef = id => S.agents.find(a => a.id === id);
-const PANE_ICONS = { shell: '›_', agent: '✦', sbx: '⬢', sandbox: '⧉' };
+const PANE_ICONS = { shell: '›_', agent: '✦', command: '▶', sbx: '⬢', sandbox: '⧉' };
 
 // ---------------------------------------------------------------- agent icons
 // Each agent has an icon (icons.js) and a color, chosen in Settings → Agents.
@@ -189,6 +190,7 @@ class Pane {
     this.profile = spec.profile || S.defaultProfile;
     this.agentId = spec.agentId || null;
     this.sandbox = spec.sandbox || null;
+    this.command = spec.command || null;
     this.cwd = spec.cwd || tab.cwd;   // shells: live folder; agents: where they started
     this.customTitle = spec.title || null;
     this.resume = !!spec.resume;      // next start resumes the agent's last conversation (restored tabs)
@@ -205,6 +207,7 @@ class Pane {
   name() {
     if (this.kind === 'shell') return this.profile;
     if (this.kind === 'agent') return agentDef(this.agentId)?.name || this.agentId;
+    if (this.kind === 'command') return this.command;
     if (this.kind === 'sbx') return 'Docker Sandboxes';
     return `Sandbox: ${this.sandbox.name}`;
   }
@@ -346,6 +349,7 @@ class Pane {
     if (this.kind === 'shell') return { ...base, name: this.profile };
     if (this.kind === 'agent') return { ...base, name: this.agentId, resume: this.resume };
     if (this.kind === 'sandbox') return { ...base, name: this.sandbox.name, args: this.sandbox.args };
+    if (this.kind === 'command') return { ...base, name: this.command };
     return base; // sbx
   }
 
@@ -361,7 +365,7 @@ class Pane {
         this.cwd = cwd;
         if (!tabPanes(this.tab).some(p => p.kind === 'shell')) this.tab.cwd = cwd;
       }
-      if (this.kind === 'agent') this.agentStarted = Date.now();
+      if (this.kind === 'agent') { this.agentStarted = Date.now(); this.resumed = this.resume; }
       this.resume = false;
       // Agents only work after you give them something: startup banners and resumed history don't count.
       this.armed = false;
@@ -398,7 +402,7 @@ class Pane {
   dispose() { this.disposed = true; this.kill(); this.term?.dispose(); this.el.remove(); }
 }
 
-const paneJson = p => ({ kind: p.kind, profile: p.profile, agentId: p.agentId, sandbox: p.sandbox, cwd: p.cwd, title: p.customTitle });
+const paneJson = p => ({ kind: p.kind, profile: p.profile, agentId: p.agentId, sandbox: p.sandbox, command: p.command, cwd: p.cwd, title: p.customTitle });
 
 function deliver(p, ev) {
   if ('exit' in ev) return p.markExited(ev.exit);
@@ -474,8 +478,7 @@ function initialLayout(tab, o) {
       : o.agentId && o.agent !== false && { kind: 'agent', agentId: o.agentId, cwd: o.agentCwd || tab.cwd, resume: o.resume };
   const agent = agentSpec && new Pane(tab, agentSpec);
   if (!shell || !agent) return Layout.group([shell || agent].filter(Boolean));
-  const pos = o.position || S.agentPanePosition;
-  if (pos === 'tab') return Layout.group([shell, agent], 1);
+  const pos = ['left', 'right', 'top', 'bottom'].includes(o.position || S.agentPanePosition) ? o.position || S.agentPanePosition : 'right';
   const g = Layout.group([shell]);
   const root = Layout.splitAt(g, g, Layout.group([agent]), pos);
   const agentShare = clamp((o.size || S.agentPaneSize) / 100, 0.1, 0.9);
@@ -519,20 +522,20 @@ function startPanes(tab) {
 }
 
 // A plain new tab uses the default template when one is set; asking for a profile or agent skips it.
-function newTab({ cwd, profile, agent, template } = {}) {
+function newTab({ cwd, profile, agent, template, command } = {}) {
+  if (command) return createTab({ type: 'workspace', cwd, title: command, layout: { panes: [{ kind: 'command', command }] } });
   const name = template ?? (profile === undefined && agent === undefined ? S.defaultTemplate : '');
   const tpl = name && S.templates.find(t => t.name === name);
   if (tpl) return createTab({ type: 'workspace', cwd, layout: tpl.layout });
   return createTab({ type: 'workspace', cwd, profile, agentId: agent ?? S.defaultAgent });
 }
 
-// Adds a pane to a tab: as a tab in a group, or split off to the right / below it.
+// Adds a pane to a tab, split off to the right of (or below) a group.
 function addPane(tab, spec, { group, placement = S.newPanePlacement } = {}) {
   if (!tab || tab.type === 'sbx') return null;
   const g = group || Layout.groupOf(tab.root, focusedPane(tab)) || Layout.groups(tab.root)[0];
   const p = new Pane(tab, { ...spec, cwd: spec.cwd || focusedPane(tab)?.cwd || tab.cwd });
-  if (placement === 'right' || placement === 'down') tab.root = Layout.splitAt(tab.root, g, Layout.group([p]), placement === 'right' ? 'right' : 'bottom');
-  else Layout.addToGroup(g, p);
+  tab.root = Layout.splitAt(tab.root, g, Layout.group([p]), placement === 'down' ? 'bottom' : 'right');
   tab.zoom = null;
   renderLayout(tab);
   p.open();
@@ -556,7 +559,7 @@ function closePane(pane) {
   renderTabs();
 }
 
-// Moves a pane to another tab (into its focused group), or to a new tab when dest is null.
+// Moves a pane to another tab (right of its focused pane), or to a new tab when dest is null.
 function movePaneToTab(pane, dest) {
   const src = pane.tab;
   src.root = Layout.removePane(src.root, pane);
@@ -564,7 +567,7 @@ function movePaneToTab(pane, dest) {
   if (src.cwdPane === pane) src.cwdPane = null;
   if (dest) {
     pane.tab = dest;
-    Layout.addToGroup(Layout.groupOf(dest.root, focusedPane(dest)) || Layout.groups(dest.root)[0], pane);
+    dest.root = Layout.splitAt(dest.root, Layout.groupOf(dest.root, focusedPane(dest)) || Layout.groups(dest.root)[0], Layout.group([pane]), 'right');
     renderLayout(dest);
   }
   if (src.root) renderLayout(src);
@@ -578,10 +581,9 @@ function openAgentPane(tab = active) {
   if (!tab || tab.type === 'sbx') return;
   const agents = tabPanes(tab).filter(p => p.isAgent);
   if (agents.length) return focusPane(tab, agents[(agents.indexOf(tab.focused) + 1) % agents.length]);
-  const placement = S.newPanePlacement === 'tab' ? 'right' : S.newPanePlacement;
-  if (tab.type === 'sandbox') return addPane(tab, { kind: 'sandbox', sandbox: tab.sandbox }, { placement });
+  if (tab.type === 'sandbox') return addPane(tab, { kind: 'sandbox', sandbox: tab.sandbox });
   const agentId = S.defaultAgent || S.agents[0]?.id;
-  if (agentId) addPane(tab, { kind: 'agent', agentId }, { placement });
+  if (agentId) addPane(tab, { kind: 'agent', agentId });
 }
 
 function toggleAgentFocus(tab = active) {
@@ -662,7 +664,6 @@ function focusPane(tab, pane) {
   if (!pane) return;
   const g = Layout.groupOf(tab.root, pane);
   if (tab.zoom && tab.zoom !== g) { tab.zoom = null; renderLayout(tab); }
-  if (g.panes[g.active] !== pane) { g.active = g.panes.indexOf(pane); updateGroup(g); }
   setFocused(tab, pane);
   if (tab === active) pane.term?.focus();
 }
@@ -688,6 +689,7 @@ function switchAgent(id) {
   if (p?.kind !== 'agent') return addPane(tab, { kind: 'agent', agentId: id });
   p.agentId = id;
   p.title = null;
+  p.usage = null;
   tab.info.model = tab.info.modelLabel = null;
   p.applySettings();
   p.restart();
@@ -718,39 +720,28 @@ function buildNode(tab, node) {
   return box;
 }
 
+// A group holds one pane under its header.
 function buildGroup(tab, g) {
-  g.strip = el('div', { className: 'pane-strip', role: 'tablist' });
-  g.body = el('div', { className: 'group-body' }, ...g.panes.map(p => p.el));
-  g.box = el('div', { className: 'group' }, g.strip, g.body);
-  g.box.addEventListener('pointerdown', () => { if (!g.panes.includes(tab.focused)) focusPane(tab, g.panes[g.active]); }, true);
-  renderStrip(tab, g);
-  updateGroup(g);
+  const p = g.panes[0];
+  g.body = el('div', { className: 'group-body' }, p.el);
+  g.box = el('div', { className: 'group' }, paneHeader(tab, g, p), g.body);
+  g.box.addEventListener('pointerdown', () => { if (tab.focused !== p) focusPane(tab, p); }, true);
+  requestAnimationFrame(() => p.refit());
   return g.box;
 }
 
-// Shows the group's active pane; the others stay laid out (so xterm can measure them) but hidden.
-function updateGroup(g) {
-  g.panes.forEach((p, i) => {
-    p.el.classList.toggle('inactive', i !== g.active);
-    p.tabEl?.classList.toggle('active', i === g.active);
-    p.tabEl?.setAttribute('aria-selected', String(i === g.active));
-  });
-  requestAnimationFrame(() => g.panes[g.active]?.refit());
-  scheduleSave();
-}
-
-function renderStrip(tab, g) {
-  const add = el('button', { className: 'strip-add', textContent: '+', title: 'New terminal or agent', ariaLabel: 'New terminal or agent' });
-  add.onclick = () => showAddMenu(tab, g, add);
-  g.strip.replaceChildren(...g.panes.map(p => paneTab(tab, p)), add);
-}
-
-function paneTab(tab, p) {
-  const close = el('button', { className: 'ptab-close', textContent: '×' });
-  close.onpointerdown = e => e.stopPropagation();
-  close.onclick = e => { e.stopPropagation(); closePane(p); };
-  const t = p.tabEl = el('div', { className: 'ptab', role: 'tab' },
-    el('span', { className: 'ptab-icon', ariaHidden: 'true' }), el('span', { className: 'ptab-title' }), close);
+// The pane's header: its name, what it's working on (see updatePaneInfo), + and close. Drag it to move the pane.
+function paneHeader(tab, g, p) {
+  const button = (className, text, label, run) => {
+    const b = el('button', { className, textContent: text, title: label, ariaLabel: label });
+    b.onpointerdown = e => e.stopPropagation();
+    b.onclick = e => { e.stopPropagation(); run(b); };
+    return b;
+  };
+  const t = p.tabEl = el('div', { className: 'pane-header' },
+    el('span', { className: 'ptab-icon', ariaHidden: 'true' }), el('span', { className: 'ptab-title' }), el('span', { className: 'ph-info' }),
+    button('ph-add', '+', 'New terminal or agent', b => showAddMenu(tab, g, b)),
+    button('ptab-close', '×', 'Close', () => closePane(p)));
   updatePaneTab(p);
   t.onpointerdown = e => startPaneDrag(e, tab, p, t);
   t.onauxclick = e => { if (e.button === 1) closePane(p); };
@@ -766,11 +757,44 @@ function updatePaneTab(p) {
   if (p.isAgent) icon.replaceChildren(iconEl(paneLook(p), Date.now() - p.lastWork < 2000 ? 'working' : ''));
   else icon.textContent = PANE_ICONS[p.kind];
   const title = t.querySelector('.ptab-title');
-  if (title) title.textContent = p.label();
-  t.title = [p.name(), p.cwd, p.title].filter(Boolean).join('\n');
+  if (title) title.textContent = p.customTitle || p.name(); // the folder has its own spot in the header
+  t.title =[p.name(), p.cwd, p.title].filter(Boolean).join('\n');
   const close = t.querySelector('.ptab-close');
   close.title = `Close ${p.label()} (Ctrl+Shift+W)`;
   close.ariaLabel = `Close ${p.label()}`;
+  updatePaneInfo(p);
+}
+
+const fmtTokens = n => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}K`);
+
+// The header's details, per the paneHeader setting. Context and cost come from Claude Code's transcript.
+function updatePaneInfo(p) {
+  const box = p.tabEl?.querySelector('.ph-info');
+  if (!box) return;
+  const h = S.paneHeader, u = p.isAgent ? p.usage : null;
+  // shortcut: git is the tab's folder (its terminal's); an agent started elsewhere shows the tab's repo.
+  const git = p.tab.info.git;
+  const item = (cls, text, title = '') => el('span', { className: `ph-item ${cls}`, textContent: text, title });
+  const items = [];
+  if (p.isAgent) {
+    const model = u?.modelLabel || (p === primaryAgent(p.tab) ? p.tab.info.modelLabel : null);
+    if (h.model && model) items.push(item('ph-model', u ? `${model} (${fmtTokens(u.window)} context)` : model));
+    if (h.context && u) {
+      const pct = Math.min(100, Math.round(u.context / u.window * 100));
+      const bar = el('span', { className: 'ph-bar' }, el('span', { style: `width:${pct}%` }));
+      items.push(el('span', { className: 'ph-item ph-context', title: `${fmtTokens(u.context)} of ${fmtTokens(u.window)} tokens` }, 'Context ', bar, ` ${pct}%`));
+    }
+    if (h.status && p.ptyId) {
+      const working = Date.now() - p.lastWork < 2000;
+      items.push(item(`ph-status${working ? ' working' : ''}`, working ? 'Working…' : 'Waiting for you'));
+    }
+    if (h.cost && u) items.push(item('ph-cost', `$${u.cost.toFixed(2)}`, 'Estimated from token usage at API prices'));
+  }
+  if (h.git && git?.repo) items.push(item('ph-repo', git.repo, 'Repository'));
+  if (h.git && git?.branch) items.push(item('ph-branch', git.branch, 'Branch'));
+  if (h.directory && p.cwd) items.push(item('ph-dir', basename(p.cwd), p.cwd));
+  const key = items.map(i => i.textContent).join('|');
+  if (box.dataset.key !== key) { box.dataset.key = key; box.replaceChildren(...items); }
 }
 
 function renamePane(p) {
@@ -815,8 +839,8 @@ function gutter(node, index, box, done = scheduleSave) {
 
 function showAddMenu(tab, g, anchor) {
   const add = spec => addPane(tab, spec, { group: g });
-  const seg = el('div', { className: 'menu-seg', role: 'radiogroup', ariaLabel: 'Open new panes as' },
-    ...[['tab', 'Tab'], ['right', 'Split right'], ['down', 'Split down']].map(([v, l]) => {
+  const seg = el('div', { className: 'menu-seg', role: 'radiogroup', ariaLabel: 'Open new panes' },
+    ...[['right', 'Split right'], ['down', 'Split down']].map(([v, l]) => {
       const b = el('button', { textContent: l, className: S.newPanePlacement === v ? 'on' : '', role: 'radio' });
       b.setAttribute('aria-checked', String(S.newPanePlacement === v));
       b.onclick = e => {
@@ -832,7 +856,8 @@ function showAddMenu(tab, g, anchor) {
     '-', 'Agent',
     tab.type === 'sandbox' && { label: `Sandbox: ${tab.sandbox.name}`, run: () => add({ kind: 'sandbox', sandbox: tab.sandbox }) },
     ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
-    '-', 'Open new panes as', seg,
+    ...(S.commands.length ? ['-', 'Command', ...S.commands.map(c => ({ label: c.name, run: () => add({ kind: 'command', command: c.name }) }))] : []),
+    '-', 'Open new panes', seg,
   ]);
 }
 
@@ -840,6 +865,7 @@ function showAddMenu(tab, g, anchor) {
 function reopenAgentIn(p, dir) {
   p.cwd = dir;
   p.resume = false;
+  p.usage = null;
   p.tab.info.model = p.tab.info.modelLabel = null;
   p.restart();
   updatePaneTab(p);
@@ -863,8 +889,8 @@ function showPaneMenu(p, at) {
 }
 
 // ---------------------------------------------------------------- dragging panes (Windows-style snap)
-// Drag a pane's tab onto: a pane's edge (split there), its middle (join as a tab), a tab strip (insert),
-// a sidebar tab (move to that tab) or empty sidebar space (new tab). A highlight previews the result.
+// Drag a pane's header onto: another pane (split it on the nearest side), a sidebar tab (move to that tab)
+// or empty sidebar space (new tab). A highlight previews the result.
 function startPaneDrag(down, tab, pane, src) {
   if (down.button !== 0) return;
   focusPane(tab, pane);
@@ -920,21 +946,10 @@ function dropTarget(tab, pane, x, y) {
   const box = at.closest('.group');
   const g = box && tab.view.contains(box) && Layout.groups(tab.root).find(n => n.box === box);
   if (!g) return null;
-  const own = Layout.groupOf(tab.root, pane);
-  const strip = at.closest('.pane-strip');
-  if (strip) {
-    const tabEls = [...strip.querySelectorAll('.ptab')];
-    let index = tabEls.findIndex(t => { const r = t.getBoundingClientRect(); return x < r.left + r.width / 2; });
-    if (index < 0) index = tabEls.length;
-    const ref = tabEls[index] || tabEls.at(-1);
-    const rr = ref.getBoundingClientRect();
-    return { kind: 'group', group: g, side: 'center', index, rect: g.body.getBoundingClientRect(),
-      marker: { x: tabEls[index] ? rr.left - 2 : rr.right + 1, top: rr.top, height: rr.height }, label: g === own ? 'Move here' : 'Add as a tab' };
-  }
-  const rect = g.body.getBoundingClientRect();
-  const side = Layout.dropZone(rect, x, y, clamp(S.snapEdge, 10, 45) / 100);
-  if (g === own && (side === 'center' || g.panes.length === 1)) return null; // would land where it already is
-  const labels = { left: 'Split left', right: 'Split right', top: 'Split up', bottom: 'Split down', center: 'Add as a tab' };
+  if (g === Layout.groupOf(tab.root, pane)) return null; // would land where it already is
+  const rect = g.box.getBoundingClientRect();
+  const side = Layout.dropZone(rect, x, y);
+  const labels = { left: 'Split left', right: 'Split right', top: 'Split up', bottom: 'Split down' };
   return { kind: 'group', group: g, side, rect: Layout.zoneRect(rect, side), label: labels[side] };
 }
 
@@ -954,7 +969,7 @@ function showSnap(target) {
 function dropPane(tab, pane, target) {
   if (target.kind === 'tab') return movePaneToTab(pane, target.tab);
   if (target.kind === 'newtab') return movePaneToTab(pane, null);
-  tab.root = Layout.movePane(tab.root, pane, target.group, target.side, target.index);
+  tab.root = Layout.movePane(tab.root, pane, target.group, target.side);
   tab.zoom = null;
   renderLayout(tab);
   focusPane(tab, pane);
@@ -1099,11 +1114,12 @@ function gitLine(g) {
 // What runs in a tab, in one line: the agent (and its model) first, then the terminals.
 function panesLine(tab) {
   const all = tabPanes(tab);
-  const agents = all.filter(p => p.isAgent), shells = all.filter(p => p.kind === 'shell');
+  const agents = all.filter(p => p.isAgent), shells = all.filter(p => p.kind === 'shell'), commands = all.filter(p => p.kind === 'command');
   const lead = primaryAgent(tab) || agents[0];
   const parts = [];
   if (tab.type === 'sandbox') parts.push(`⧉ ${[tab.sandbox.agent || 'sandbox', tab.info.status].filter(Boolean).join(' · ')}`);
   else if (lead) parts.push(`${[lead.name(), tab.info.modelLabel].filter(Boolean).join(' · ')}${agents.length > 1 ? ` +${agents.length - 1}` : ''}`);
+  if (commands.length) parts.push(`▶ ${commands.map(p => p.command).join(', ')}`);
   if (shells.length) parts.push(shells.length === 1 ? `›_ ${shells[0].profile}` : `›_ ${shells.length} terminals`);
   return parts.join('  ');
 }
@@ -1311,7 +1327,10 @@ setInterval(() => {
   else if (tipTab) showTip(tipTab); // keep its timers and pane states live
   // Each agent's own tab icon pulses while that agent works.
   const now = Date.now();
-  for (const p of tabPanes(active)) p.tabEl?.querySelector('.ptab-icon .agent-icon')?.classList.toggle('working', isWorking(p.tab) && now - p.lastWork < 2000);
+  for (const p of tabPanes(active)) {
+    p.tabEl?.querySelector('.ptab-icon .agent-icon')?.classList.toggle('working', isWorking(p.tab) && now - p.lastWork < 2000);
+    updatePaneInfo(p);
+  }
 }, 500);
 
 async function refreshInfo(list = tabs) {
@@ -1320,7 +1339,13 @@ async function refreshInfo(list = tabs) {
   await Promise.all(list.map(async t => {
     if (t.type === 'sbx') { t.info.sandboxes = sandboxes; return; }
     if (t.type === 'sandbox') t.info.status = sandboxes?.find(s => s.name === t.sandbox.name)?.status;
-    if (!(S.tabMetadata.git || S.tabMetadata.model)) return;
+    const h = S.paneHeader;
+    if (h.model || h.context || h.cost) {
+      await Promise.all(tabPanes(t).filter(p => p.kind === 'agent').map(async p => {
+        try { p.usage = await api.getAgentUsage({ cwd: p.cwd, agentId: p.agentId, since: p.agentStarted || 0, resumed: p.resumed }); } catch { /* keep the last known */ }
+      }));
+    }
+    if (!(S.tabMetadata.git || S.tabMetadata.model || h.git || h.model)) return;
     try {
       const a = primaryAgent(t);
       const { git, model, modelLabel } = await api.getInfo({
@@ -1339,7 +1364,7 @@ const TAB_COLORS = ['#E74856', '#F7630C', '#FFB900', '#16C60C', '#00B7C3', '#007
 
 function setTabColor(tab, color) {
   tab.color = color || null;
-  for (const p of tabPanes(tab)) updatePaneTab(p); // pane tab icons follow the tab color
+  for (const p of tabPanes(tab)) updatePaneTab(p); // pane header icons follow the tab color
   renderTabs();
 }
 
@@ -1394,6 +1419,7 @@ $('#new-tab-menu').onclick = e => showMenu(e.currentTarget, [
   ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => newTab({ profile: p.name }) })),
   '-', 'Agent',
   ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
+  ...(S.commands.length ? ['-', 'Command', ...S.commands.map(c => ({ label: c.name, run: () => newTab({ command: c.name }) }))] : []),
   '-', 'Template',
   ...S.templates.map(t => ({ label: t.name + (t.name === S.defaultTemplate ? ' (default)' : ''), run: () => newTab({ template: t.name }) })),
   { label: 'Edit templates…', run: () => openSettings('Templates') },
@@ -1459,6 +1485,7 @@ function openPalette() {
   paletteItems = [
     ...actions,
     ...S.profiles.map(p => ({ name: `New tab: ${p.name}`, run: () => newTab({ profile: p.name }) })),
+    ...S.commands.map(c => ({ name: `New tab: ${c.name}`, run: () => newTab({ command: c.name }) })),
     ...S.templates.map(t => ({ name: `New tab from template: ${t.name}`, run: () => newTab({ template: t.name }) })),
     { name: 'Save tab as template', run: saveTabAsTemplate },
     ...S.profiles.map(p => ({ name: `New terminal pane: ${p.name}`, run: () => addPane(active, { kind: 'shell', profile: p.name }) })),
@@ -1553,7 +1580,7 @@ function swatches(name) {
       .map(k => el('span', { style: `background:${s[k]}`, title: k })));
 }
 const NEW_TAB_LAYOUTS = [['right', 'Agent on the right'], ['left', 'Agent on the left'], ['bottom', 'Agent below'],
-  ['top', 'Agent above'], ['tab', 'Terminal and agent as tabs']];
+  ['top', 'Agent above']];
 const schemeOptions = () => S.schemes.map(s => s.name);
 function browseButton(onPick) {
   const b = el('button', { textContent: 'Browse…', type: 'button' });
@@ -1643,12 +1670,10 @@ function templateCard(tpl) {
   const build = node => {
     if (node.kind === 'group') {
       return el('div', { className: 'tpl-group' },
-        node.panes.length > 1 && el('div', { className: 'tpl-stacked', textContent: `${node.panes.length} panes as tabs` }),
         ...node.panes.map(slot),
         el('div', { className: 'tpl-tools' },
           button('Split →', 'Add a pane to the right', () => { root = Layout.splitAt(root, node, Layout.group([fresh()]), 'right'); commit(); }),
-          button('Split ↓', 'Add a pane below', () => { root = Layout.splitAt(root, node, Layout.group([fresh()]), 'bottom'); commit(); }),
-          button('+ Tab', 'Stack another pane here as a tab', () => { Layout.addToGroup(node, fresh()); commit(); })));
+          button('Split ↓', 'Add a pane below', () => { root = Layout.splitAt(root, node, Layout.group([fresh()]), 'bottom'); commit(); })));
     }
     const box = el('div', { className: `tpl-split split-${node.dir}` });
     node.children.forEach((c, i) => {
@@ -1761,7 +1786,7 @@ const SECTIONS = {
       input(S.startingDirectory, v => set('startingDirectory', v)), browseButton(d => set('startingDirectory', d))),
     'Folder for new tabs. Use "Open folder…" (Ctrl+Shift+O) to open a tab somewhere else.'),
     field('New tab layout', select(S.agentPanePosition, NEW_TAB_LAYOUTS, v => set('agentPanePosition', v)),
-      'How the terminal and agent are arranged in a new tab, unless a template is set (Settings → Templates). Rearrange any tab by dragging its pane tabs.'),
+      'How the terminal and agent are arranged in a new tab, unless a template is set (Settings → Templates). Rearrange any tab by dragging its pane headers.'),
     field('Agent pane size (%)', input(S.agentPaneSize, v => set('agentPaneSize', clamp(v, 10, 90)), 'number')),
     field('Copy on select', checkbox(S.copyOnSelect, v => set('copyOnSelect', v))),
     field('Drag selects text in apps that use the mouse', checkbox(S.dragToSelect, v => set('dragToSelect', v)),
@@ -1792,14 +1817,21 @@ const SECTIONS = {
       'Animated while an agent works, orange when it needs attention, green when it finished in the background. Hover a tab for details.'),
   ],
   Panes: () => [
-    el('p', { className: 'note', textContent: 'Each tab can hold any number of terminals and agents. Drag a pane\'s tab onto the edge of another pane to split, onto its middle or its tab strip to stack it as a tab, onto a tab in the sidebar to move it there, or onto empty sidebar space to give it its own tab.' }),
-    field('New panes open as', select(S.newPanePlacement, [['tab', 'A tab in the same group'], ['right', 'A split to the right'], ['down', 'A split below']], v => set('newPanePlacement', v)),
-      'For the + button on each tab strip and New terminal pane (Ctrl+Shift+E).'),
+    el('p', { className: 'note', textContent: 'Each tab can hold any number of terminals and agents, each under its own header. Drag a header onto another pane to split it on that side, onto a tab in the sidebar to move it there, or onto empty sidebar space to give it its own tab.' }),
+    field('New panes open', select(S.newPanePlacement === 'down' ? 'down' : 'right', [['right', 'To the right'], ['down', 'Below']], v => set('newPanePlacement', v)),
+      'For the + button on each pane header and New terminal pane (Ctrl+Shift+E).'),
     field('Snap preview while dragging', toggle(S.snapPreview, v => set('snapPreview', v)), 'Highlights where the pane will land.'),
     field('Animate the preview', toggle(S.paneAnimations, v => set('paneAnimations', v))),
-    field('Edge snap area (%)', input(S.snapEdge, v => set('snapEdge', clamp(v, 10, 45)), 'number'),
-      'How far into a pane counts as its edge (splits). Closer to the middle stacks the pane as a tab.'),
-    field('Close buttons on pane tabs', select(S.paneCloseButton, [['always', 'Always'], ['hover', 'Active tab and on hover']], v => set('paneCloseButton', v))),
+    field('Close buttons on pane headers', select(S.paneCloseButton, [['always', 'Always'], ['hover', 'On hover']], v => set('paneCloseButton', v))),
+    el('h3', { textContent: 'Pane header' }),
+    el('p', { className: 'note', textContent: 'Context and cost are read from Claude Code sessions. Other agents show their model only.' }),
+    field('Model and context window', checkbox(S.paneHeader.model, v => set('paneHeader', { model: v }))),
+    field('Context used', checkbox(S.paneHeader.context, v => set('paneHeader', { context: v }))),
+    field('Cost', checkbox(S.paneHeader.cost, v => set('paneHeader', { cost: v })),
+      'Estimated from token usage at API prices. Subscription plans aren\'t billed this way.'),
+    field('Agent status', checkbox(S.paneHeader.status, v => set('paneHeader', { status: v })), 'Working, or waiting for you.'),
+    field('Repository and branch', checkbox(S.paneHeader.git, v => set('paneHeader', { git: v }))),
+    field('Folder', checkbox(S.paneHeader.directory, v => set('paneHeader', { directory: v }))),
   ],
   Templates: templatesSection,
   Appearance: () => [

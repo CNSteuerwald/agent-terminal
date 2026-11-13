@@ -6,7 +6,7 @@ const path = require('path');
 const pty = require('node-pty');
 const settings = require('./settings');
 const sandbox = require('./sandbox');
-const { getInfo } = require('./info');
+const { getInfo, agentUsage } = require('./info');
 const updater = require('./updater');
 
 // The installer's product name ("Agent Terminal") would otherwise move settings away from
@@ -166,11 +166,12 @@ fs.watchFile(SETTINGS_FILE, { interval: 1000 }, () => {
   broadcastSettings();
 });
 
-// kind: 'shell' (name = profile), 'agent' (name = agent id), 'sbx' (the sbx TUI),
+// kind: 'shell' (name = profile), 'agent' (name = agent id), 'command' (name = command tab), 'sbx' (the sbx TUI),
 // 'sandbox' (args = sbx arguments, e.g. ['run', '--name', 'my-sandbox']).
 async function launchSpec({ kind, name, args, resume }) {
   if (kind === 'shell') return settings.shellLaunch(current.settings, name);
   if (kind === 'agent') return settings.agentLaunch(current.settings, name, !!resume);
+  if (kind === 'command') return settings.commandLaunch(current.settings, name);
   if (kind !== 'sbx' && kind !== 'sandbox') return null;
   const file = await sbxPath();
   if (!file) throw new Error('sbx was not found on PATH. Install Docker Sandboxes: https://docs.docker.com/ai/sandboxes/');
@@ -184,7 +185,10 @@ ipcMain.handle('pty:spawn', async (e, req) => {
   const spec = await launchSpec(req);
   if (!spec) throw new Error(`Unknown ${kind} "${name}". Check your settings.`);
   const dir = settings.resolveDir(cwd);
-  let env = { ...process.env, COLORTERM: 'truecolor', TERM_PROGRAM: 'agent-terminal', ...spec.env };
+  const base = { ...process.env };
+  const fresh = await settings.freshPath();
+  if (fresh) base[Object.keys(base).find(k => k.toUpperCase() === 'PATH') || 'Path'] = fresh;
+  let env = { ...base, COLORTERM: 'truecolor', TERM_PROGRAM: 'agent-terminal', ...spec.env };
   if (kind === 'sbx') {
     env = sandbox.shimEnv(env, await sandbox.ensureShim(SHIM_DIR));
     sbxOwner = e.sender;
@@ -210,6 +214,7 @@ ipcMain.on('pty:resize', (_e, id, cols, rows) => {
 ipcMain.on('pty:kill', (_e, id) => { ptys.get(id)?.proc.kill(); ptys.delete(id); });
 
 ipcMain.handle('info:get', (_e, req) => getInfo(req));
+ipcMain.handle('info:usage', (_e, req) => agentUsage(req));
 ipcMain.handle('sbx:list', async () => sandbox.list(await sbxPath()));
 // What the setup wizard needs to know: which agent CLIs and sbx are installed.
 ipcMain.handle('setup:detect', async () => {

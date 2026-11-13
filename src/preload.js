@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   onExit: cb => ipcRenderer.on('pty:exit', (_e, id, code) => cb(id, code)),
 
   getInfo: req => ipcRenderer.invoke('info:get', req),
+  getAgentUsage: req => ipcRenderer.invoke('info:usage', req),
   getSession: () => ipcRenderer.invoke('session:get'),
   saveSession: s => ipcRenderer.send('session:save', s),
   sbxList: () => ipcRenderer.invoke('sbx:list'),
