@@ -1598,15 +1598,21 @@ function defaultTabLabel() {
 
 // ---------------------------------------------------------------- new-tab templates
 // A template is { name, layout }: a pane tree in Layout.serialize form whose panes are
-// { kind: 'shell', profile } or { kind: 'agent', agentId } (plus an optional title).
-const paneChoices = () => [...S.profiles.map(p => [`shell:${p.name}`, `›_  ${p.name}`]), ...S.agents.map(a => [`agent:${a.id}`, `✦  ${a.name}`])];
-const choiceOf = p => (p.kind === 'agent' ? `agent:${p.agentId}` : `shell:${p.profile}`);
+// { kind: 'shell', profile }, { kind: 'agent', agentId } or { kind: 'command', command } (plus an optional title).
+const paneChoices = () => [...S.profiles.map(p => [`shell:${p.name}`, `›_  ${p.name}`]), ...S.agents.map(a => [`agent:${a.id}`, `✦  ${a.name}`]),
+  ...S.commands.map(c => [`command:${c.name}`, `▶  ${c.name}`])];
+const choiceOf = p => (p.kind === 'agent' ? `agent:${p.agentId}` : p.kind === 'command' ? `command:${p.command}` : `shell:${p.profile}`);
 function specOf(choice) {
   const [kind, ...rest] = choice.split(':');
-  return kind === 'agent' ? { kind, agentId: rest.join(':') } : { kind: 'shell', profile: rest.join(':') };
+  const name = rest.join(':');
+  if (kind === 'agent') return { kind, agentId: name };
+  if (kind === 'command') return { kind, command: name };
+  return { kind: 'shell', profile: name };
 }
 const templatePane = p => ({
-  ...(p.kind === 'agent' ? { kind: 'agent', agentId: p.agentId } : { kind: 'shell', profile: p.kind === 'shell' ? p.profile : S.defaultProfile }),
+  ...(p.kind === 'agent' ? { kind: 'agent', agentId: p.agentId }
+    : p.kind === 'command' ? { kind: 'command', command: p.command }
+      : { kind: 'shell', profile: p.kind === 'shell' ? p.profile : S.defaultProfile }),
   ...(p.customTitle && { title: p.customTitle }),
 });
 
@@ -1659,13 +1665,13 @@ function templateCard(tpl) {
 
   const slot = p => {
     const pick = select(choiceOf(p), paneChoices(), v => {
-      for (const k of ['kind', 'profile', 'agentId']) delete p[k];
+      for (const k of ['kind', 'profile', 'agentId', 'command']) delete p[k];
       Object.assign(p, specOf(v));
       commit();
     });
     pick.ariaLabel = 'Pane runs';
     return el('div', { className: 'tpl-slot' },
-      p.kind === 'agent' ? iconEl(agentLook(p.agentId)) : el('span', { className: 'tpl-shell', textContent: '›_', ariaHidden: 'true' }), pick,
+      p.kind === 'agent' ? iconEl(agentLook(p.agentId)) : el('span', { className: 'tpl-shell', textContent: PANE_ICONS[p.kind] || '›_', ariaHidden: 'true' }), pick,
       total > 1 && button('×', 'Remove this pane', () => { root = Layout.removePane(root, p); commit(); }, 'tpl-x'));
   };
   const build = node => {

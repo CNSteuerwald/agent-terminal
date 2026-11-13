@@ -67,7 +67,7 @@ const DEFAULTS = {
   schemes: [],
   keybindings: {},
   // New-tab templates: { name, layout } where layout is a pane tree (see layout.js serialize) of
-  // { kind: 'shell', profile } and { kind: 'agent', agentId } panes. '' = terminal + default agent.
+  // { kind: 'shell', profile }, { kind: 'agent', agentId } and { kind: 'command', command } panes. '' = terminal + default agent.
   templates: [],
   defaultTemplate: '',
   // Command tabs: { name, command } runs any command in a new tab, e.g. { name: 'Lazy Docker', command: 'lazydocker' }.
