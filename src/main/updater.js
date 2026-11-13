@@ -1,9 +1,11 @@
 'use strict';
 // Auto-update from the GitHub Releases that the release workflow publishes (see .github/workflows/release.yml).
 // No dialogs: progress and "ready" show in the window's bottom bar (update:status). A downloaded update
-// installs silently when the app quits, or right away via the bar's "Restart now" (update:install).
+// installs silently when the app quits, or right away via the bar's "Restart now" (update:install),
+// which shows a small "Updating" window until the new version opens (update-splash.js).
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { execFile } = require('child_process');
+const { showUpdateSplash } = require('./update-splash');
 
 const CHECK_EVERY_MS = 15 * 60 * 1000;
 
@@ -31,6 +33,7 @@ function start({ beforeInstall }) {
   ipcMain.handle('update:get', () => status);
   ipcMain.on('update:install', () => {
     if (status?.state !== 'ready') return;
+    showUpdateSplash({ version: status.version }); // the silent install otherwise shows nothing until the app reopens
     beforeInstall();
     autoUpdater.quitAndInstall(true, true); // silent install, then relaunch
   });
