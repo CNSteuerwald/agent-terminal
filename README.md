@@ -348,3 +348,7 @@ The UI is plain JavaScript with [xterm.js](https://xtermjs.org/), with no framew
 ## Not included (yet)
 
 Keeping processes alive across restarts (tabs reopen and agents resume, but processes restart), code signing, macOS/Linux installers, and the original's ACP chat, error auto-fix and session-management features. The agent's own CLI covers most of those.
+
+## License
+
+[GPL-3.0](LICENSE). Releases up to and including v0.2.3 were published under MIT.
