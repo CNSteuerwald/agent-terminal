@@ -69,6 +69,8 @@ const DEFAULTS = {
   // { kind: 'shell', profile } and { kind: 'agent', agentId } panes. '' = terminal + default agent.
   templates: [],
   defaultTemplate: '',
+  // Command tabs: { name, command } runs any command in a new tab, e.g. { name: 'Lazy Docker', command: 'lazydocker' }.
+  commands: [],
 };
 
 function detectShells() {
@@ -109,6 +111,7 @@ function load(file) {
   s.profiles = mergeBy('name', detectShells(), user.profiles || []).filter(p => !p.hidden);
   s.agents = mergeBy('id', DEFAULT_AGENTS, user.agents || []).filter(a => !a.hidden);
   s.schemes = mergeBy('name', BUILTIN_SCHEMES, user.schemes || []);
+  s.commands = (Array.isArray(user.commands) ? user.commands : []).filter(c => c?.name && c?.command);
   if (!s.profiles.some(p => p.name === s.defaultProfile)) s.defaultProfile = s.profiles[0]?.name || '';
   return { settings: s, error };
 }
@@ -187,9 +190,18 @@ function agentLaunch(s, id, resume) {
   const a = s.agents.find(x => x.id === id);
   if (!a) return null;
   // "|| plain command": resuming fails when the folder has no previous conversation; start fresh then.
-  const command = resume && a.resumeArgs ? `${a.command} ${a.resumeArgs} || ${a.command}` : a.command;
+  return inShell(resume && a.resumeArgs ? `${a.command} ${a.resumeArgs} || ${a.command}` : a.command);
+}
+
+// Command tabs run the same way as agents.
+function commandLaunch(s, name) {
+  const c = s.commands.find(x => x.name === name);
+  return c ? inShell(c.command) : null;
+}
+
+function inShell(command) {
   if (IS_WIN) return { file: process.env.ComSpec || 'cmd.exe', args: `/d /s /c "${command}"` };
   return { file: process.env.SHELL || '/bin/sh', args: ['-lc', command] };
 }
 
-module.exports = { load, update, resolveDir, shellLaunch, agentLaunch, mergeBy, freshPath, regValue };
+module.exports = { load, update, resolveDir, shellLaunch, agentLaunch, commandLaunch, mergeBy, freshPath, regValue };

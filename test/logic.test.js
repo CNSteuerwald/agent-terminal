@@ -117,3 +117,12 @@ test('PATH is read back from reg query output', async () => {
   assert.equal(settings.regValue('ERROR: The system was unable to find the specified registry key or value.'), '');
   if (process.platform === 'win32') assert.match(await settings.freshPath(), /system32/i);
 });
+
+test('command tabs run their command in the shell; incomplete entries are dropped', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-terminal-')), 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({ commands: [{ name: 'Lazy Docker', command: 'lazydocker' }, { name: 'broken' }] }));
+  const s = settings.load(file).settings;
+  assert.deepEqual(s.commands.map(c => c.name), ['Lazy Docker']);
+  assert.match([].concat(settings.commandLaunch(s, 'Lazy Docker').args).join(' '), /lazydocker/);
+  assert.equal(settings.commandLaunch(s, 'broken'), null);
+});

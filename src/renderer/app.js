@@ -154,10 +154,11 @@ function xtermTheme(name) {
 
 // ---------------------------------------------------------------- panes
 // A pane runs one process: a shell, an agent CLI, the sbx dashboard, or a sandbox session.
-// spec: { kind: 'shell', profile } | { kind: 'agent', agentId } | { kind: 'sbx' } | { kind: 'sandbox', sandbox },
+// spec: { kind: 'shell', profile } | { kind: 'agent', agentId } | { kind: 'command', command } (a command tab's name)
+//   | { kind: 'sbx' } | { kind: 'sandbox', sandbox },
 // plus optional cwd, title and resume.
 const agentDef = id => S.agents.find(a => a.id === id);
-const PANE_ICONS = { shell: '›_', agent: '✦', sbx: '⬢', sandbox: '⧉' };
+const PANE_ICONS = { shell: '›_', agent: '✦', command: '▶', sbx: '⬢', sandbox: '⧉' };
 
 // ---------------------------------------------------------------- agent icons
 // Each agent has an icon (icons.js) and a color, chosen in Settings → Agents.
@@ -189,6 +190,7 @@ class Pane {
     this.profile = spec.profile || S.defaultProfile;
     this.agentId = spec.agentId || null;
     this.sandbox = spec.sandbox || null;
+    this.command = spec.command || null;
     this.cwd = spec.cwd || tab.cwd;   // shells: live folder; agents: where they started
     this.customTitle = spec.title || null;
     this.resume = !!spec.resume;      // next start resumes the agent's last conversation (restored tabs)
@@ -205,6 +207,7 @@ class Pane {
   name() {
     if (this.kind === 'shell') return this.profile;
     if (this.kind === 'agent') return agentDef(this.agentId)?.name || this.agentId;
+    if (this.kind === 'command') return this.command;
     if (this.kind === 'sbx') return 'Docker Sandboxes';
     return `Sandbox: ${this.sandbox.name}`;
   }
@@ -346,6 +349,7 @@ class Pane {
     if (this.kind === 'shell') return { ...base, name: this.profile };
     if (this.kind === 'agent') return { ...base, name: this.agentId, resume: this.resume };
     if (this.kind === 'sandbox') return { ...base, name: this.sandbox.name, args: this.sandbox.args };
+    if (this.kind === 'command') return { ...base, name: this.command };
     return base; // sbx
   }
 
@@ -396,7 +400,7 @@ class Pane {
   dispose() { this.disposed = true; this.kill(); this.term?.dispose(); this.el.remove(); }
 }
 
-const paneJson = p => ({ kind: p.kind, profile: p.profile, agentId: p.agentId, sandbox: p.sandbox, cwd: p.cwd, title: p.customTitle });
+const paneJson = p => ({ kind: p.kind, profile: p.profile, agentId: p.agentId, sandbox: p.sandbox, command: p.command, cwd: p.cwd, title: p.customTitle });
 
 function deliver(p, ev) {
   if ('exit' in ev) return p.markExited(ev.exit);
@@ -517,7 +521,8 @@ function startPanes(tab) {
 }
 
 // A plain new tab uses the default template when one is set; asking for a profile or agent skips it.
-function newTab({ cwd, profile, agent, template } = {}) {
+function newTab({ cwd, profile, agent, template, command } = {}) {
+  if (command) return createTab({ type: 'workspace', cwd, title: command, layout: { panes: [{ kind: 'command', command }] } });
   const name = template ?? (profile === undefined && agent === undefined ? S.defaultTemplate : '');
   const tpl = name && S.templates.find(t => t.name === name);
   if (tpl) return createTab({ type: 'workspace', cwd, layout: tpl.layout });
@@ -830,6 +835,7 @@ function showAddMenu(tab, g, anchor) {
     '-', 'Agent',
     tab.type === 'sandbox' && { label: `Sandbox: ${tab.sandbox.name}`, run: () => add({ kind: 'sandbox', sandbox: tab.sandbox }) },
     ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
+    ...(S.commands.length ? ['-', 'Command', ...S.commands.map(c => ({ label: c.name, run: () => add({ kind: 'command', command: c.name }) }))] : []),
     '-', 'Open new panes as', seg,
   ]);
 }
@@ -1097,11 +1103,12 @@ function gitLine(g) {
 // What runs in a tab, in one line: the agent (and its model) first, then the terminals.
 function panesLine(tab) {
   const all = tabPanes(tab);
-  const agents = all.filter(p => p.isAgent), shells = all.filter(p => p.kind === 'shell');
+  const agents = all.filter(p => p.isAgent), shells = all.filter(p => p.kind === 'shell'), commands = all.filter(p => p.kind === 'command');
   const lead = primaryAgent(tab) || agents[0];
   const parts = [];
   if (tab.type === 'sandbox') parts.push(`⧉ ${[tab.sandbox.agent || 'sandbox', tab.info.status].filter(Boolean).join(' · ')}`);
   else if (lead) parts.push(`${[lead.name(), tab.info.modelLabel].filter(Boolean).join(' · ')}${agents.length > 1 ? ` +${agents.length - 1}` : ''}`);
+  if (commands.length) parts.push(`▶ ${commands.map(p => p.command).join(', ')}`);
   if (shells.length) parts.push(shells.length === 1 ? `›_ ${shells[0].profile}` : `›_ ${shells.length} terminals`);
   return parts.join('  ');
 }
@@ -1392,6 +1399,7 @@ $('#new-tab-menu').onclick = e => showMenu(e.currentTarget, [
   ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => newTab({ profile: p.name }) })),
   '-', 'Agent',
   ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
+  ...(S.commands.length ? ['-', 'Command', ...S.commands.map(c => ({ label: c.name, run: () => newTab({ command: c.name }) }))] : []),
   '-', 'Template',
   ...S.templates.map(t => ({ label: t.name + (t.name === S.defaultTemplate ? ' (default)' : ''), run: () => newTab({ template: t.name }) })),
   { label: 'Edit templates…', run: () => openSettings('Templates') },
@@ -1457,6 +1465,7 @@ function openPalette() {
   paletteItems = [
     ...actions,
     ...S.profiles.map(p => ({ name: `New tab: ${p.name}`, run: () => newTab({ profile: p.name }) })),
+    ...S.commands.map(c => ({ name: `New tab: ${c.name}`, run: () => newTab({ command: c.name }) })),
     ...S.templates.map(t => ({ name: `New tab from template: ${t.name}`, run: () => newTab({ template: t.name }) })),
     { name: 'Save tab as template', run: saveTabAsTemplate },
     ...S.profiles.map(p => ({ name: `New terminal pane: ${p.name}`, run: () => addPane(active, { kind: 'shell', profile: p.name }) })),

@@ -166,11 +166,12 @@ fs.watchFile(SETTINGS_FILE, { interval: 1000 }, () => {
   broadcastSettings();
 });
 
-// kind: 'shell' (name = profile), 'agent' (name = agent id), 'sbx' (the sbx TUI),
+// kind: 'shell' (name = profile), 'agent' (name = agent id), 'command' (name = command tab), 'sbx' (the sbx TUI),
 // 'sandbox' (args = sbx arguments, e.g. ['run', '--name', 'my-sandbox']).
 async function launchSpec({ kind, name, args, resume }) {
   if (kind === 'shell') return settings.shellLaunch(current.settings, name);
   if (kind === 'agent') return settings.agentLaunch(current.settings, name, !!resume);
+  if (kind === 'command') return settings.commandLaunch(current.settings, name);
   if (kind !== 'sbx' && kind !== 'sandbox') return null;
   const file = await sbxPath();
   if (!file) throw new Error('sbx was not found on PATH. Install Docker Sandboxes: https://docs.docker.com/ai/sandboxes/');

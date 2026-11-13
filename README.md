@@ -289,6 +289,11 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
     { "name": "Command Prompt", "hidden": true }
   ],
 
+  // Command tabs: any command in its own tab, from the new-tab menu, a pane's + menu or the palette.
+  "commands": [
+    { "name": "Lazy Docker", "command": "lazydocker" }
+  ],
+
   // Extra color schemes, in Windows Terminal's format (paste them straight from WT).
   "schemes": [],
 
