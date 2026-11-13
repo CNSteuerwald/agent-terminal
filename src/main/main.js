@@ -184,7 +184,10 @@ ipcMain.handle('pty:spawn', async (e, req) => {
   const spec = await launchSpec(req);
   if (!spec) throw new Error(`Unknown ${kind} "${name}". Check your settings.`);
   const dir = settings.resolveDir(cwd);
-  let env = { ...process.env, COLORTERM: 'truecolor', TERM_PROGRAM: 'agent-terminal', ...spec.env };
+  const base = { ...process.env };
+  const fresh = await settings.freshPath();
+  if (fresh) base[Object.keys(base).find(k => k.toUpperCase() === 'PATH') || 'Path'] = fresh;
+  let env = { ...base, COLORTERM: 'truecolor', TERM_PROGRAM: 'agent-terminal', ...spec.env };
   if (kind === 'sbx') {
     env = sandbox.shimEnv(env, await sandbox.ensureShim(SHIM_DIR));
     sbxOwner = e.sender;

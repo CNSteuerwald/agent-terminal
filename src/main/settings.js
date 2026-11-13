@@ -141,6 +141,26 @@ function resolveDir(dir) {
   return os.homedir();
 }
 
+// PATH as the registry has it now. Installers (winget etc.) only update the registry, so
+// without this new tabs keep the PATH this app launched with. Null off Windows or on failure.
+async function freshPath() {
+  if (!IS_WIN) return null;
+  const { execFile } = require('child_process');
+  const read = key => new Promise(resolve => execFile('reg', ['query', key, '/v', 'Path'],
+    { windowsHide: true, timeout: 3000 }, (err, out) => resolve(err ? '' : regValue(out))));
+  const [sys, user] = await Promise.all([
+    read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'),
+    read('HKCU\\Environment'),
+  ]);
+  return sys ? [sys, user].filter(Boolean).map(expand).join(';') : null;
+}
+
+// The data of the Path value in `reg query` output.
+function regValue(out) {
+  const m = String(out).match(/^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/mi);
+  return m ? m[1].trim() : '';
+}
+
 // Returns { file, args, env } with cwd-reporting shell integration for PowerShell, cmd and bash.
 // Profiles that pass their own -Command/-File are left alone.
 function shellLaunch(s, name) {
@@ -172,4 +192,4 @@ function agentLaunch(s, id, resume) {
   return { file: process.env.SHELL || '/bin/sh', args: ['-lc', command] };
 }
 
-module.exports = { load, update, resolveDir, shellLaunch, agentLaunch, mergeBy };
+module.exports = { load, update, resolveDir, shellLaunch, agentLaunch, mergeBy, freshPath, regValue };

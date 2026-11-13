@@ -110,3 +110,10 @@ test('detected shell profiles follow the default color scheme', () => {
   assert.ok(s.profiles.every(p => !p.colorScheme));
   assert.deepEqual(s.templates, []);
 });
+
+test('PATH is read back from reg query output', async () => {
+  const out = '\r\nHKEY_CURRENT_USER\Environment\r\n    Path    REG_EXPAND_SZ    %USERPROFILE%\bin;C:\tools\r\n\r\n';
+  assert.equal(settings.regValue(out), '%USERPROFILE%\bin;C:\tools');
+  assert.equal(settings.regValue('ERROR: The system was unable to find the specified registry key or value.'), '');
+  if (process.platform === 'win32') assert.match(await settings.freshPath(), /system32/i);
+});
