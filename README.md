@@ -138,33 +138,32 @@ npm test
 
 ### Panes: as many terminals and agents as you want
 
-Each tab in the sidebar holds a layout of **panes**: terminals and agents, any number of each. Panes sit in **groups**. A group has a tab strip along its top, and groups are split side by side or stacked, like editor groups in VS Code.
+Each tab in the sidebar holds a layout of **panes**: terminals and agents, any number of each. Panes are split side by side or stacked vertically, and each has a **header** along its top.
 
-- **Add a pane:** the **+** at the right end of a group's tab strip adds a terminal (any shell profile) or an agent (any CLI). The menu also chooses where new panes go: as a **Tab** in that group, **Split right**, or **Split down**. `Ctrl+Shift+E` adds a terminal, `Alt+Shift+=` / `Alt+Shift+-` split one off right / down, and `Ctrl+Shift+.` opens (or cycles through) agent panes.
-- **Close a pane** with the **×** next to its name, a middle-click on its tab, or `Ctrl+Shift+W`. Closing a tab's last pane closes the tab.
-- **Drag a pane's tab** to rearrange. A highlight shows exactly where it will land:
-  - onto the **edge** of a pane: splits that pane, and the pane goes on that side
-  - onto the **middle** of a pane: joins that group as a tab
-  - onto a **tab strip**: inserts it at that spot (also reorders tabs)
+- **Pane headers** show the pane's name, its repository, branch and folder, and for agents the model and context window (*Opus 5.5 (1M context)*), how much context is used, whether it's working or waiting for you, and optionally an estimated cost. Context and cost are read from Claude Code's session; other agents show their model. Choose what shows in **Settings → Panes → Pane header**.
+- **Add a pane:** the **+** in a pane's header adds a terminal (any shell profile) or an agent (any CLI). The menu also chooses where new panes go: **Split right** or **Split down**. `Ctrl+Shift+E` adds a terminal, `Alt+Shift+=` / `Alt+Shift+-` split one off right / down, and `Ctrl+Shift+.` opens (or cycles through) agent panes.
+- **Close a pane** with the **×** next to its name, a middle-click on its header, or `Ctrl+Shift+W`. Closing a tab's last pane closes the tab.
+- **Drag a pane's header** to rearrange. A highlight shows exactly where it will land:
+  - onto another **pane**: splits that pane, and the pane goes on the side nearest the pointer
   - onto **another tab in the sidebar**: moves it into that tab, still running
   - onto **empty sidebar space**: opens it as its own tab
   - `Esc` cancels a drag.
 - **Resize** by dragging the bar between panes, or with `Alt+Shift+Arrows`. **Move focus** between panes with `Alt+Arrows`. `Ctrl+Shift+I` jumps between your terminal and your agent.
-- **Right-click a pane's tab** to rename it, restart it, split it off, move it to a new tab or close it. Double-click renames.
-- **Reopen an agent somewhere else:** right-click an agent's pane tab (Claude Code or any other agent CLI) and pick one of the folders the tab's terminals are in, under **Reopen agent in**. The agent restarts there (✓ marks where it runs now). Sandbox sessions don't offer this: they stay in their sandbox's workspace.
-- Each agent's icon on its pane tab animates while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
+- **Right-click a pane's header** to rename it, restart it, split it off, move it to a new tab or close it. Double-click renames.
+- **Reopen an agent somewhere else:** right-click an agent's pane header (Claude Code or any other agent CLI) and pick one of the folders the tab's terminals are in, under **Reopen agent in**. The agent restarts there (✓ marks where it runs now). Sandbox sessions don't offer this: they stay in their sandbox's workspace.
+- Each agent's icon in its pane header animates while that agent works. The sidebar shows the model of the focused (or first) agent, with `+N` when a tab has more.
 
 ### Agent icons
 
-Every agent has its own icon and color, shown in the sidebar, on its pane tab, in the hover card and in menus. While an agent works, its icon comes alive in its own way: the spark spins and twinkles, the robot looks around and its antenna blinks, the orbit's moon circles, the equalizer bounces, the rocket's flame flickers, the eye glances about, the cat tilts its head and blinks, and so on.
+Every agent has its own icon and color, shown in the sidebar, in its pane header, in the hover card and in menus. While an agent works, its icon comes alive in its own way: the spark spins and twinkles, the robot looks around and its antenna blinks, the orbit's moon circles, the equalizer bounces, the rocket's flame flickers, the eye glances about, the cat tilts its head and blinks, and so on.
 
 - **Change an agent's look** in **Settings → Agents**: click its icon to pick from 14 icons (spark, orbit, robot, cube, equalizer, gear, atom, ghost, flame, terminal, rocket, eye, pulse, cat), choose one of the colors or any custom color, and preview how it looks idle, working, needing you and finished. **Reset to default icon and color** undoes it.
 - Defaults: Claude Code is a coral spark, Copilot a purple robot, Codex a green cube, Gemini a blue orbit, OpenCode an amber terminal. Agents you add yourself start as a spark in the accent color.
 - Turn the motion off in **Settings → Appearance → Animate agent icons** (working icons still glow). Windows' "reduce animations" setting also stops it.
-- New tabs start as a terminal plus your default agent, arranged per **Settings → General → New tab layout** (agent right / left / below / above, or both as tabs in one group), unless you pick a template.
-- **Templates** (**Settings → Templates**) save a starting layout: which shells and agents a new tab opens with and where they sit, e.g. Claude Code on the left and PowerShell on the right. Split a box right or down, stack panes as tabs, pick what each pane runs, and drag the dividers to size them. **Save current tab as template** captures a tab you've already arranged. Choose one under **New tabs open with** to make it the default; all templates are also in the **+ New tab group** menu and the palette (*New tab from template: …*).
-- **Customize** in **Settings → Panes**: where new panes open, the snap preview and its animation, how much of a pane's edge counts as "split here" (vs. "stack as a tab"), and whether close buttons always show.
-- Layouts, including splits, sizes, stacked tabs and pane names, are saved and reopen with your tabs.
+- New tabs start as a terminal plus your default agent, arranged per **Settings → General → New tab layout** (agent right / left / below / above), unless you pick a template.
+- **Templates** (**Settings → Templates**) save a starting layout: which shells and agents a new tab opens with and where they sit, e.g. Claude Code on the left and PowerShell on the right. Split a box right or down, pick what each pane runs, and drag the dividers to size them. **Save current tab as template** captures a tab you've already arranged. Choose one under **New tabs open with** to make it the default; all templates are also in the **+ New tab group** menu and the palette (*New tab from template: …*).
+- **Customize** in **Settings → Panes**: where new panes open, the snap preview and its animation, whether close buttons always show, and what pane headers show.
+- Layouts, including splits, sizes and pane names, are saved and reopen with your tabs.
 - **Zoom:** Ctrl+scroll over a terminal, `Ctrl+=` / `Ctrl+-`, or the zoom dropdown in the bottom bar (50% to 200%, relative to your font size in settings), and a **Reset** button (or `Ctrl+0`) appears whenever you're not at 100%.
 - When a process exits, press **Enter** in its pane to restart it.
 - In the agent pane, `Shift+Enter` sends a newline (Meta+Enter) instead of submitting, which Claude Code and most agent TUIs understand.
@@ -262,10 +261,11 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "tabLayout": "vertical",                 // "vertical" | "horizontal"
   "sidebarWidth": 260,
   "tabMetadata": { "directory": true, "git": true, "model": true, "activity": true },
-  "agentPanePosition": "right",            // new tab layout: "right" | "left" | "bottom" | "top" | "tab"
-  "newPanePlacement": "tab",               // + button: "tab" | "right" | "down"
+  "agentPanePosition": "right",            // new tab layout: "right" | "left" | "bottom" | "top"
+  "newPanePlacement": "right",             // + button: "right" | "down"
   "snapPreview": true, "paneAnimations": true,
-  "snapEdge": 30,                          // % of a pane that counts as its edge when dropping
+  // What each pane's header shows. Context and cost are read from Claude Code sessions.
+  "paneHeader": { "model": true, "context": true, "cost": false, "status": true, "git": true, "directory": true },
   "paneCloseButton": "always",             // "always" | "hover"
   "iconAnimations": true,                  // agent icons animate while their agent works
   "agentPaneSize": 50,                     // percent

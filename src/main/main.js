@@ -6,7 +6,7 @@ const path = require('path');
 const pty = require('node-pty');
 const settings = require('./settings');
 const sandbox = require('./sandbox');
-const { getInfo } = require('./info');
+const { getInfo, agentUsage } = require('./info');
 const updater = require('./updater');
 
 // The installer's product name ("Agent Terminal") would otherwise move settings away from
@@ -214,6 +214,7 @@ ipcMain.on('pty:resize', (_e, id, cols, rows) => {
 ipcMain.on('pty:kill', (_e, id) => { ptys.get(id)?.proc.kill(); ptys.delete(id); });
 
 ipcMain.handle('info:get', (_e, req) => getInfo(req));
+ipcMain.handle('info:usage', (_e, req) => agentUsage(req));
 ipcMain.handle('sbx:list', async () => sandbox.list(await sbxPath()));
 // What the setup wizard needs to know: which agent CLIs and sbx are installed.
 ipcMain.handle('setup:detect', async () => {

@@ -126,3 +126,21 @@ test('command tabs run their command in the shell; incomplete entries are droppe
   assert.match([].concat(settings.commandLaunch(s, 'Lazy Docker').args).join(' '), /lazydocker/);
   assert.equal(settings.commandLaunch(s, 'broken'), null);
 });
+
+test('context and cost from Claude Code transcript lines', () => {
+  const usage = { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 1e6, cache_creation_input_tokens: 1000,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1000 } };
+  // Opus 5.5: $4 in, $20 out, $0.20 cache read, 1 h cache write at 2x input
+  assert.equal(info.messageCost('claude-opus-5-5', usage).toFixed(4), (0.004 + 0.02 + 0.2 + 0.008).toFixed(4));
+  assert.equal(info.messageCost('claude-opus-5-5', { ...usage, speed: 'fast' }).toFixed(4), (2 * 0.232).toFixed(4));
+  assert.equal(info.messageCost('some-other-model', usage), 0);
+
+  const c = { costs: new Map(), last: null };
+  const line = (id, u, extra = {}) => JSON.stringify({ type: 'assistant', ...extra, message: { id, model: 'claude-opus-5-5', usage: u } });
+  info.addUsageLine(c, line('a', usage));
+  info.addUsageLine(c, line('a', usage)); // same message, another content block
+  info.addUsageLine(c, line('b', { input_tokens: 5, output_tokens: 0 }, { isSidechain: true }));
+  assert.equal(c.costs.size, 2);
+  assert.equal(c.last.context, 1000 + 1e6 + 1000); // sidechain lines don't move the main context
+  info.addUsageLine(c, 'not json "usage"');
+});

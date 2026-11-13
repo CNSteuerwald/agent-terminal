@@ -37,28 +37,28 @@ test('same-direction splits flatten', () => {
   assert.deepEqual(sizes(root), [50, 25, 25]);
 });
 
-test('moving panes: into a group, reorder, split off, and no-op on itself', () => {
-  let root = L.split('row', [L.group(['a', 'b']), L.group(['c'])]);
-  root = L.movePane(root, 'b', L.groupOf(root, 'c'), 'center', 0);
-  assert.equal(shape(root), 'row([a] [b*,c])');
-  root = L.movePane(root, 'b', L.groupOf(root, 'b'), 'center', 2); // reorder within the group
-  assert.equal(shape(root), 'row([a] [c,b*])');
+test('moving panes: split off, and no-op on itself', () => {
+  let root = L.split('row', [L.group(['a']), L.group(['b']), L.group(['c'])]);
   root = L.movePane(root, 'c', L.groupOf(root, 'b'), 'bottom');
   assert.equal(shape(root), 'row([a] col([b] [c]))');
   const before = shape(root);
   root = L.movePane(root, 'a', L.groupOf(root, 'a'), 'right'); // only pane in its group
   assert.equal(shape(root), before);
-  root = L.movePane(root, 'a', L.groupOf(root, 'c'), 'center');
-  assert.equal(shape(root), 'col([b] [c,a*])'); // a's group emptied and the row collapsed
+  root = L.movePane(root, 'a', L.groupOf(root, 'c'), 'right');
+  assert.equal(shape(root), 'col([b] row([c] [a]))'); // a's group emptied and the row collapsed
+});
+
+test('panes stacked by older versions open side by side', () => {
+  assert.equal(shape(L.deserialize({ panes: [{ name: 'a' }, { name: 'b' }], active: 1 }, j => j.name)), 'row([a] [b])');
 });
 
 test('drop zones and their preview rects', () => {
   const r = { left: 0, top: 0, width: 400, height: 200 };
-  assert.equal(L.dropZone(r, 20, 100, 0.25), 'left');
-  assert.equal(L.dropZone(r, 390, 100, 0.25), 'right');
-  assert.equal(L.dropZone(r, 200, 10, 0.25), 'top');
-  assert.equal(L.dropZone(r, 200, 195, 0.25), 'bottom');
-  assert.equal(L.dropZone(r, 200, 100, 0.25), 'center');
+  assert.equal(L.dropZone(r, 20, 100), 'left');
+  assert.equal(L.dropZone(r, 390, 100), 'right');
+  assert.equal(L.dropZone(r, 200, 10), 'top');
+  assert.equal(L.dropZone(r, 200, 195), 'bottom');
+  assert.equal(L.dropZone(r, 200, 60), 'top'); // nearest edge, even from the middle
   assert.deepEqual(L.zoneRect(r, 'right'), { left: 200, top: 0, width: 200, height: 200 });
   assert.deepEqual(L.zoneRect(r, 'bottom'), { left: 0, top: 100, width: 400, height: 100 });
 });

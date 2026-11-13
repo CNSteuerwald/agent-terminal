@@ -45,10 +45,11 @@ const DEFAULTS = {
   tabMetadata: { directory: true, git: true, model: true, activity: true },
   agentPanePosition: 'right', // new tab layout: right | left | bottom | top | tab
   agentPaneSize: 50,
-  newPanePlacement: 'tab',     // + button / new pane: tab | right | down
+  newPanePlacement: 'right',   // + button / new pane: right | down
   snapPreview: true,
   paneAnimations: true,
-  snapEdge: 30,                // % of a pane counted as its edge when dropping (split vs. stack)
+  // What each pane's header shows. Context and cost: Claude Code only.
+  paneHeader: { model: true, context: true, cost: false, status: true, git: true, directory: true },
   paneCloseButton: 'always',   // always | hover
   iconAnimations: true,        // agent icons animate while their agent works
   colorScheme: 'Campbell',
@@ -108,6 +109,7 @@ function load(file) {
   try { user = readUser(file); } catch (e) { error = `settings.json: ${e.message}`; }
   const s = { ...DEFAULTS, ...user };
   s.tabMetadata = { ...DEFAULTS.tabMetadata, ...user.tabMetadata };
+  s.paneHeader = { ...DEFAULTS.paneHeader, ...user.paneHeader };
   s.profiles = mergeBy('name', detectShells(), user.profiles || []).filter(p => !p.hidden);
   s.agents = mergeBy('id', DEFAULT_AGENTS, user.agents || []).filter(a => !a.hidden);
   s.schemes = mergeBy('name', BUILTIN_SCHEMES, user.schemes || []);
@@ -122,7 +124,7 @@ function update(file, patch) {
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) delete user[k];
     else if (k === 'profiles' || k === 'agents') user[k] = mergeBy(k === 'profiles' ? 'name' : 'id', user[k] || [], v);
-    else if (k === 'tabMetadata' || k === 'keybindings') {
+    else if (k === 'tabMetadata' || k === 'paneHeader' || k === 'keybindings') {
       user[k] = { ...user[k], ...v };
       for (const [kk, vv] of Object.entries(v)) if (vv === null) delete user[k][kk]; // null = back to default
     }

@@ -94,16 +94,26 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 .group { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .group-body { position: relative; flex: 1 1 0; min-height: 0; }
 .group-body > .pane { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--term-bg); }
-/* Stacked panes that aren't showing stay laid out (xterm can still measure) but invisible. */
-.group-body > .pane.inactive { visibility: hidden; pointer-events: none; }
 .term { flex: 1; min-height: 0; padding: 4px 0 0 6px; }
 
-/* Pane tabs: browser-style tabs whose active tab merges into the terminal below it. */
-.pane-strip { display: flex; align-items: flex-end; gap: 2px; height: 32px; padding: 4px 4px 0 6px; background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex: 0 0 auto; }
-.ptab { position: relative; display: flex; align-items: center; gap: 6px; height: 27px; min-width: 70px; max-width: 230px; flex: 0 1 auto; padding: 0 4px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; color: var(--muted); font-size: 12px; user-select: none; cursor: default; }
-.ptab:hover { background: var(--hover); color: var(--fg); }
-.ptab.active { background: var(--term-bg); border-color: var(--border); color: var(--fg); height: 28px; margin-bottom: -1px; }
-.group.focused .ptab.active { box-shadow: inset 0 2px 0 var(--accent); }
+/* Pane header: name, then what the pane is working on; details that don't fit are cut from the end. */
+.pane-header { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 10px; flex: 0 0 auto; background: var(--bg); border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; white-space: nowrap; user-select: none; cursor: default; overflow: hidden; }
+.group.focused .pane-header { box-shadow: inset 0 2px 0 var(--accent); color: var(--fg); }
+.pane-header .ptab-title { flex: 0 1 auto; max-width: 200px; font-weight: 600; }
+/* Details that don't fit wrap onto a second row, which is clipped: they disappear whole, from the end. */
+.ph-info { display: flex; flex-wrap: wrap; align-items: center; column-gap: 14px; flex: 1 1 0; min-width: 0; height: 20px; overflow: hidden; margin-left: 6px; }
+.ph-item { flex: 0 0 auto; max-width: 180px; height: 20px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.ph-model { color: var(--fg); }
+.ph-context { display: inline-flex; align-items: center; gap: 6px; }
+.ph-branch::before { content: "⑂ "; }
+.ph-dir::before { content: "▸ "; }
+.ph-bar { display: inline-block; width: 44px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.ph-bar > span { display: block; height: 100%; background: var(--accent); }
+.ph-status { color: var(--accent); }
+.ph-status.working { color: var(--fg); }
+.ph-repo { padding: 1px 6px; border-radius: 4px; background: var(--hover); color: var(--fg); }
+.ph-add { flex: 0 0 auto; width: 22px; height: 20px; padding: 0; margin-left: auto; border-radius: 4px; font-size: 16px; line-height: 1; color: var(--muted); }
+.ph-add:hover { color: var(--fg); }
 .ptab-icon { font: 11px/1 ui-monospace, Consolas, monospace; opacity: .75; flex: 0 0 auto; }
 .ptab-icon.working { display: inline-block; color: var(--accent); opacity: 1; animation: twinkle 1.6s ease-in-out infinite; }
 @keyframes twinkle {
@@ -118,12 +128,10 @@ button:focus-visible, .tab:focus-visible, input:focus-visible, select:focus-visi
 .ptab-input { width: 130px; font: inherit; padding: 1px 4px; }
 .ptab-close { flex: 0 0 auto; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-left: -2px; border-radius: 4px; font-size: 14px; line-height: 1; opacity: .55; }
 .ptab-close:hover { opacity: 1; background: var(--hover); }
-body[data-close-buttons="hover"] .ptab:not(:hover):not(.active) .ptab-close { visibility: hidden; }
-.ptab.drag-source { opacity: .45; }
-.strip-add { position: sticky; right: 0; margin-left: auto; align-self: center; flex: 0 0 auto; width: 26px; height: 24px; padding: 0; border-radius: 6px; font-size: 17px; line-height: 1; color: var(--muted); background: var(--bg); }
-.strip-add:hover { color: var(--fg); }
-/* The sbx dashboard fills the whole tab: no tab strip. */
-.view.type-sbx .pane-strip { display: none; }
+body[data-close-buttons="hover"] .pane-header:not(:hover) .ptab-close { visibility: hidden; }
+.pane-header.drag-source { opacity: .45; }
+/* The sbx dashboard fills the whole tab: no header. */
+.view.type-sbx .pane-header { display: none; }
 
 /* Drag and drop: a Windows-snap-style highlight of where the pane will land. */
 #snap-overlay { position: fixed; z-index: 25; pointer-events: none; display: grid; place-items: center; border: 2px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 8px 30px #0005, inset 0 0 0 1px #fff1; }
