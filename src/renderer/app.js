@@ -365,7 +365,7 @@ class Pane {
         this.cwd = cwd;
         if (!tabPanes(this.tab).some(p => p.kind === 'shell')) this.tab.cwd = cwd;
       }
-      if (this.kind === 'agent') { this.agentStarted = Date.now(); this.resumed = this.resume; }
+      if (this.kind === 'agent') { this.agentStarted = Date.now(); this.resumed = this.resume; this.usage = null; }
       this.resume = false;
       // Agents only work after you give them something: startup banners and resumed history don't count.
       this.armed = false;
@@ -1339,8 +1339,9 @@ async function refreshInfo(list = tabs) {
     if (t.type === 'sandbox') t.info.status = sandboxes?.find(s => s.name === t.sandbox.name)?.status;
     const h = S.paneHeader;
     if (h.model || h.context || h.cost) {
-      await Promise.all(tabPanes(t).filter(p => p.kind === 'agent').map(async p => {
-        try { p.usage = await api.getAgentUsage({ cwd: p.cwd, agentId: p.agentId, since: p.agentStarted || 0, resumed: p.resumed }); } catch { /* keep the last known */ }
+      // Not before the agent has started: without its start time any session in the folder would match.
+      await Promise.all(tabPanes(t).filter(p => p.kind === 'agent' && p.agentStarted).map(async p => {
+        try { p.usage = await api.getAgentUsage({ cwd: p.cwd, agentId: p.agentId, since: p.agentStarted, resumed: p.resumed }); } catch { /* keep the last known */ }
       }));
     }
     if (!(S.tabMetadata.git || S.tabMetadata.model || h.git || h.model)) return;
@@ -1861,6 +1862,29 @@ const SECTIONS = {
         el('td', { textContent: a.name }),
         el('td', {}, Object.assign(input(a.command, v => v.trim() && set('agents', [{ id: a.id, command: v.trim() }])), { className: 'command' }))))),
   ],
+  Commands: () => {
+    const save = list => set('commands', list);
+    const edit = (i, patch) => save(S.commands.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+    const draft = { name: '', command: '' };
+    const add = () => {
+      if (draft.name && draft.command && !S.commands.some(c => c.name === draft.name)) save([...S.commands, { ...draft }]);
+    };
+    const remove = (c, i) => Object.assign(el('button', { textContent: '×', title: `Remove ${c.name}`, ariaLabel: `Remove ${c.name}`, type: 'button' }),
+      { onclick: () => save(S.commands.filter((_, j) => j !== i)) });
+    return [
+      el('p', { className: 'note', textContent: 'Run any command in its own tab, such as lazydocker or htop. Each one is listed in the New tab group menu, a pane\'s + menu and the palette. It runs in your shell, exactly as if you typed it; press Enter to run it again after it exits.' }),
+      el('table', { className: 'list' },
+        el('tr', {}, el('th', { textContent: 'Name' }), el('th', { textContent: 'Command' }), el('th')),
+        ...S.commands.map((c, i) => el('tr', {},
+          el('td', {}, input(c.name, v => v.trim() && edit(i, { name: v.trim() }))),
+          el('td', {}, Object.assign(input(c.command, v => v.trim() && edit(i, { command: v.trim() })), { className: 'command' })),
+          el('td', {}, remove(c, i)))),
+        el('tr', {},
+          el('td', {}, Object.assign(input('', v => { draft.name = v.trim(); add(); }), { placeholder: 'New: name (e.g. Lazy Docker)' })),
+          el('td', {}, Object.assign(input('', v => { draft.command = v.trim(); add(); }), { className: 'command', placeholder: 'command (e.g. lazydocker)' })),
+          el('td'))),
+    ];
+  },
   Sandboxes: () => [
     el('p', { className: 'note', textContent: 'Docker Sandboxes runs agents in isolated containers. When enabled, a pinned "sbx" tab runs the sbx dashboard, and sandboxes you open from it with "External terminal" open here as new tabs.' }),
     field('Docker Sandboxes support', toggle(S.sandboxEnabled, v => set('sandboxEnabled', v))),

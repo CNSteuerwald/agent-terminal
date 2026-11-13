@@ -289,7 +289,7 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
     { "name": "Command Prompt", "hidden": true }
   ],
 
-  // Command tabs: any command in its own tab, from the new-tab menu, a pane's + menu or the palette.
+  // Command tabs (also in Settings → Commands): any command in its own tab, from the new-tab menu, a pane's + menu or the palette.
   "commands": [
     { "name": "Lazy Docker", "command": "lazydocker" }
   ],
