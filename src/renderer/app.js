@@ -202,14 +202,15 @@ class Pane {
     this.el = el('div', { className: `pane pane-${this.kind}` }, this.host);
   }
 
-  get isAgent() { return this.kind === 'agent' || this.kind === 'sandbox'; }
+  // A sandbox pane with sandbox.exec is a shell inside the container, not its agent.
+  get isAgent() { return this.kind === 'agent' || (this.kind === 'sandbox' && !this.sandbox.exec); }
 
   name() {
     if (this.kind === 'shell') return this.profile;
     if (this.kind === 'agent') return agentDef(this.agentId)?.name || this.agentId;
     if (this.kind === 'command') return this.command;
     if (this.kind === 'sbx') return 'Docker Sandboxes';
-    return `Sandbox: ${this.sandbox.name}`;
+    return `${this.sandbox.exec ? 'Shell in' : 'Sandbox:'} ${this.sandbox.name}`;
   }
 
   // Tab text: your name for it, else what runs in it (shells also show their folder).
@@ -586,6 +587,11 @@ function openAgentPane(tab = active) {
   if (agentId) addPane(tab, { kind: 'agent', agentId });
 }
 
+// Opens a shell inside a sandbox's container (sbx exec), next to its agent.
+function openSandboxShell(tab, { name, agent }) {
+  addPane(tab, { kind: 'sandbox', sandbox: { name, agent, exec: true, args: ['exec', '-it', name, 'bash'] } });
+}
+
 function toggleAgentFocus(tab = active) {
   if (!tab) return;
   const cur = focusedPane(tab);
@@ -608,14 +614,31 @@ function ensureSbxTab({ activate: show }) {
 
 // Called when the sbx TUI opens a sandbox in an "external terminal".
 async function openSandboxTab({ args, name }) {
-  const open = tabs.find(t => t.type === 'sandbox' && t.sandbox?.name === name && tabPanes(t).some(p => p.kind === 'sandbox' && p.ptyId));
+  const open = tabs.find(t => t.type === 'sandbox' && t.sandbox?.name === name && tabPanes(t).some(p => p.isAgent && p.ptyId));
   if (open) return activate(open);
   const sb = (await api.sbxList()).find(s => s.name === name);
   const workspace = sb?.workspaces?.[0];
+  const sandbox = { name, args, agent: sb?.agent };
   createTab({
-    type: 'sandbox', title: name || 'sandbox', sandbox: { name, args, agent: sb?.agent },
-    cwd: workspace, shell: !!workspace,
+    type: 'sandbox', title: name || 'sandbox', sandbox, cwd: workspace, shell: !!workspace,
+    layout: sandboxTemplateLayout(sandbox, !!workspace),
   });
+}
+
+// The default template with its first agent running the sandbox and any other agents left out.
+// Shells need the sandbox's workspace folder. Null (the plain shell + sandbox layout) when there's no template or agent.
+function sandboxTemplateLayout(sandbox, hasWorkspace) {
+  const tpl = S.templates.find(t => t.name === S.defaultTemplate);
+  let placed = false;
+  const root = tpl && Layout.deserialize(tpl.layout, j => {
+    if (j.kind === 'agent') {
+      if (placed) return null;
+      placed = true;
+      return { kind: 'sandbox', sandbox, title: j.title };
+    }
+    return j.kind === 'shell' && !hasWorkspace ? null : j;
+  });
+  return placed ? Layout.serialize(root, j => j) : null;
 }
 
 function closeTab(tab) {
@@ -878,6 +901,8 @@ function showPaneMenu(p, at) {
   const dirs = p.kind === 'agent' ? [...new Set(tabPanes(p.tab).filter(x => x.kind === 'shell').map(x => x.cwd))] : [];
   showMenu(at, [
     ...(dirs.length ? ['Reopen agent in', ...dirs.map(d => ({ label: `${d === p.cwd ? '✓' : '\u2003'} ${shortPath(d)}`, run: () => reopenAgentIn(p, d) })), '-'] : []),
+    p.kind === 'sandbox' && { label: 'Open shell in sandbox', run: () => openSandboxShell(p.tab, p.sandbox) },
+    p.kind === 'sandbox' && '-',
     { label: 'Rename', run: () => renamePane(p) },
     { label: 'Restart', run: () => p.restart() },
     multi && { label: 'Split right', run: () => dropPane(p.tab, p, { kind: 'group', group: Layout.groupOf(p.tab.root, p), side: 'right' }) },
@@ -1385,6 +1410,7 @@ function showTabMenu(tab, at) {
     !isSbx && 'Tab color', !isSbx && swatches, !isSbx && custom,
     !isSbx && tab.color && { label: 'Reset color', run: () => setTabColor(tab, null) },
     !isSbx && '-',
+    tab.type === 'sandbox' && { label: 'Open shell in sandbox', run: () => { activate(tab); openSandboxShell(tab, tab.sandbox); } },
     { label: 'Rename tab', run: () => startRename(tab) },
     { label: 'Close tab', run: () => closeTab(tab) },
   ]);
