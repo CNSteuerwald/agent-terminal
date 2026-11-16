@@ -173,7 +173,8 @@ Every agent has its own icon and color, shown in the sidebar, in its pane header
 Turn this on in the setup wizard or **Settings → Sandboxes**. It needs [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) installed, with `sbx` on your `PATH`.
 
 - A tab titled **sbx** is pinned first in the tab list, styled in Docker blue so it stands apart from your workspace tabs. It runs the `sbx` dashboard (TUI) filling the whole tab, and the sidebar shows how many sandboxes are running.
-- When you open a sandbox from that dashboard (**Enter**, then **External terminal**), it opens **here as a new tab** named after the sandbox. The tab holds the sandbox session plus a host shell in the sandbox's workspace folder, with git status in the sidebar. Opening a sandbox that already has a tab switches to that tab.
+- When you open a sandbox from that dashboard (**Enter**, then **External terminal**), it opens **here as a new tab** named after the sandbox. The tab holds the sandbox session plus a host shell in the sandbox's workspace folder, with git status in the sidebar. Opening a sandbox that already has a tab switches to that tab. If you've set a default template (**Settings → Templates**), the tab follows it: the template's first agent runs the sandbox session, and its shells and command tabs open in the workspace folder.
+- **Shell inside a sandbox:** right-click a sandbox tab, or a sandbox pane's header, and pick **Open shell in sandbox**. It opens a pane running `sbx exec -it <sandbox> bash`, so you can look around the container next to its agent.
 - If you choose **In this terminal** in the dashboard instead, the session runs inside the sbx tab, which is normal sbx behavior.
 - Closing the sbx tab is fine. Reopen it with *Open Docker Sandboxes (sbx) tab* from the palette or the **+ New tab group** menu.
 

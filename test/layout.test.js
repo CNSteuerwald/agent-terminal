@@ -73,3 +73,11 @@ test('resize keeps a minimum size; serialize round-trips', () => {
   assert.deepEqual(sizes(back), [92, 8]);
   assert.equal(L.deserialize({ panes: [{ name: 'gone' }] }, () => null), null); // panes that can't be restored
 });
+
+// How a sandbox tab reuses the default template: drop panes it can't use, keep the rest of the layout.
+test('deserialize with dropped panes, then serialize, reshapes a template', () => {
+  const tpl = { split: 'row', sizes: [0.3, 0.7], children: [{ panes: ['agent'] }, { split: 'col', sizes: [0.5, 0.5], children: [{ panes: ['shell'] }, { panes: ['agent2'] }] }] };
+  const back = L.serialize(L.deserialize(tpl, j => (j === 'agent2' ? null : j)), j => j);
+  assert.equal(shape(L.deserialize(back, j => j)), 'row([agent] [shell])');
+  assert.deepEqual(back.sizes, [0.3, 0.7]);
+});
