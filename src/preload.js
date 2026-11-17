@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   getSession: () => ipcRenderer.invoke('session:get'),
   saveSession: s => ipcRenderer.send('session:save', s),
   sbxList: () => ipcRenderer.invoke('sbx:list'),
+  sbxCreate: opts => ipcRenderer.invoke('sbx:create', opts),
   onSbxOpen: cb => ipcRenderer.on('sbx:open', (_e, launch) => cb(launch)),
   detectSetup: () => ipcRenderer.invoke('setup:detect'),
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),

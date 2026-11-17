@@ -176,7 +176,8 @@ Turn this on in the setup wizard or **Settings → Sandboxes**. It needs [Docker
 - When you open a sandbox from that dashboard (**Enter**, then **External terminal**), it opens **here as a new tab** named after the sandbox. The tab holds the sandbox session plus a host shell in the sandbox's workspace folder, with git status in the sidebar. Opening a sandbox that already has a tab switches to that tab. If you've set a default template (**Settings → Templates**), the tab follows it: the template's first agent runs the sandbox session, and its shells and command tabs open in the workspace folder.
 - **Shell inside a sandbox:** right-click a sandbox tab, or a sandbox pane's header, and pick **Open shell in sandbox**. It opens a pane running `sbx exec -it <sandbox> bash`, so you can look around the container next to its agent.
 - If you choose **In this terminal** in the dashboard instead, the session runs inside the sbx tab, which is normal sbx behavior.
-- Closing the sbx tab is fine. Reopen it with *Open Docker Sandboxes (sbx) tab* from the palette or the **+ New tab group** menu.
+- **New sandbox:** click **+** on the sbx tab (or *New Docker sandbox…* in the palette or the **+ New tab group** menu). Pick a name, the agent, one or more workspace folders (each can be read-only; the first is where the agent starts) and, optionally, kits (`--kit` mixins: a Docker Hub/OCI reference, a `git+https://…` URL or a local folder). The dialog shows the exact `sbx create` command it will run. Kits you use are remembered and offered again next time (`sandboxKits` in settings). Once created, the sandbox opens as a tab.
+- The sbx tab can't be closed while Docker Sandboxes support is on. Turn it off in **Settings → Sandboxes** to remove the tab.
 
 **How it works (Windows):** when the sbx dashboard sees `WT_SESSION`, it opens sandboxes with `wt.exe -w new nt -- sbx … run --name <sandbox>`. Inside the sbx tab only, Agent Terminal puts its own small `wt.exe` first on `PATH` ([`src/shim/wt.cs`](src/shim/wt.cs)). That `wt.exe` sends the request to the app over a local named pipe, protected by a per-launch random token, and the app opens the tab. It only ever runs `sbx` with the arguments sbx asked for. The `wt.exe` is compiled on first use with the C# compiler built into Windows (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) and cached in the app's data folder. On macOS/Linux the sbx tab works, but sandboxes still open in sbx's own choice of external terminal.
 
@@ -256,6 +257,7 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "setupComplete": true,                   // false (or missing) shows the setup wizard on next launch
   "sandboxEnabled": false,                 // Docker Sandboxes: pinned "sbx" tab
   "sandboxCommand": "sbx",                 // name or full path of sbx
+  "sandboxKits": [],                       // kits offered in New sandbox (remembered as you use them)
   "defaultProfile": "PowerShell",          // shell for new tabs (a profile name)
   "defaultAgent": "claude",                // agent id for new tabs, "" for none
   "startingDirectory": "~",
@@ -327,7 +329,8 @@ src/
   main/settings.js   Defaults, shell detection, settings merge/patch, launch commands
   main/info.js       Git status and agent-model detection for the sidebar
   main/updater.js    Auto-update from GitHub Releases (electron-updater)
-  main/sandbox.js    Docker Sandboxes: sbx lookup, wt.exe stand-in build, named-pipe listener
+  main/sandbox.js    Docker Sandboxes: sbx lookup, sbx create, wt.exe stand-in build, named-pipe listener
+  shared/sandbox-args.js  New-sandbox validation and `sbx create` arguments (used by the UI and main)
   shim/wt.cs         The wt.exe stand-in used inside the sbx tab (Windows)
   preload.js         The small, explicit API the UI may call (context-isolated, sandboxed)
   renderer/          UI: index.html, styles.css, app.js (tabs, panes, drag and drop, actions, settings, palette), keys.js

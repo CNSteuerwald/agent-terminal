@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const SandboxArgs = require('../shared/sandbox-args');
 
 const IS_WIN = process.platform === 'win32';
 const TOKEN = crypto.randomBytes(16).toString('hex');
@@ -78,4 +79,21 @@ function list(sbxPath) {
   }));
 }
 
-module.exports = { which, parseWtLaunch, ensureShim, listen, shimEnv, list };
+// The message worth showing from a failed sbx run: its "error:" line, else the last thing it printed.
+function errorMessage(out) {
+  const lines = String(out).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const err = lines.find(l => /^error:/i.test(l));
+  return err ? err.replace(/^error:\s*/i, '') : lines.pop() || 'sbx failed.';
+}
+
+// Creates a sandbox without attaching to it. opts: see SandboxArgs.createArgs. Rejects with sbx's error.
+async function create(sbxPath, opts) {
+  if (!sbxPath) throw new Error('sbx was not found on PATH.');
+  const taken = (await list(sbxPath)).map(s => s.name);
+  const args = SandboxArgs.createArgs(SandboxArgs.validate(opts, taken));
+  // A first create can pull images, so allow a while.
+  return new Promise((resolve, reject) => execFile(sbxPath, ['--no-input', ...args], { windowsHide: true, timeout: 15 * 60000 },
+    (err, out, stderr) => (err ? reject(new Error(errorMessage(`${out}\n${stderr}`))) : resolve())));
+}
+
+module.exports = { which, parseWtLaunch, ensureShim, listen, shimEnv, list, create, errorMessage };

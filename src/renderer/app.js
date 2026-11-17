@@ -91,6 +91,7 @@ const ACTIONS = {
   resetFontSize: ['Reset font size', 'ctrl+0', () => setFontDelta(0)],
   commandPalette: ['Command palette', 'ctrl+shift+p', openPalette],
   openSbx: ['Open Docker Sandboxes (sbx) tab', '', () => ensureSbxTab({ activate: true })],
+  newSandbox: ['New Docker sandbox…', '', () => openNewSandbox()],
   openSettings: ['Open settings', 'ctrl+,', () => openSettings()],
   openSettingsFile: ['Open settings file (JSON)', 'ctrl+shift+,', () => api.openSettingsFile('user')],
   openDefaultSettingsFile: ['Open default settings (read-only)', 'ctrl+alt+,', () => api.openSettingsFile('defaults')],
@@ -125,7 +126,7 @@ function handleKey(e) {
 
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape' && closeOverlays()) return e.preventDefault();
-  if (!$('#wizard').hidden) return; // setup runs before any tab exists
+  if (!$('#wizard').hidden || !$('#sbx-new').hidden) return; // setup runs before any tab exists; dialogs own the keyboard
   if (e.defaultPrevented || e.target.closest?.('.xterm, input, select, textarea')) return;
   if (handleKey(e)) e.preventDefault();
 });
@@ -548,7 +549,7 @@ function addPane(tab, spec, { group, placement = S.newPanePlacement } = {}) {
 
 function closePane(pane) {
   const tab = pane?.tab;
-  if (!tab) return;
+  if (!tab || isPinnedSbx(tab)) return;
   pane.dispose();
   tab.root = Layout.removePane(tab.root, pane);
   if (!tab.root) return closeTab(tab);
@@ -612,12 +613,12 @@ function ensureSbxTab({ activate: show }) {
   createTab({ type: 'sbx', title: 'sbx', shell: false, atStart: true, activate: show });
 }
 
-// Called when the sbx TUI opens a sandbox in an "external terminal".
+// Called when the sbx TUI opens a sandbox in an "external terminal", and after "New sandbox".
 async function openSandboxTab({ args, name }) {
   const open = tabs.find(t => t.type === 'sandbox' && t.sandbox?.name === name && tabPanes(t).some(p => p.isAgent && p.ptyId));
   if (open) return activate(open);
   const sb = (await api.sbxList()).find(s => s.name === name);
-  const workspace = sb?.workspaces?.[0];
+  const workspace = sb?.workspaces?.[0]?.replace(/:ro$/, '');
   const sandbox = { name, args, agent: sb?.agent };
   createTab({
     type: 'sandbox', title: name || 'sandbox', sandbox, cwd: workspace, shell: !!workspace,
@@ -641,9 +642,195 @@ function sandboxTemplateLayout(sandbox, hasWorkspace) {
   return placed ? Layout.serialize(root, j => j) : null;
 }
 
+// ---------------------------------------------------------------- new sandbox dialog
+// Creates a sandbox with `sbx create` (name, agent, kits, workspaces), then opens it as a sandbox tab.
+// Kits used are remembered in the sandboxKits setting and offered again next time.
+let newSbx = null; // the dialog's state; kept while a create is running so reopening shows its progress
+
+async function openNewSandbox() {
+  if (!S.sandboxEnabled) return openSettings('Sandboxes');
+  $('#sbx-new').hidden = false;
+  if (newSbx?.busy) return renderNewSandbox();
+  const cwd = active?.type === 'workspace' && active.cwd?.replace(/^~(?=$|[\\/])/, HOME);
+  newSbx = {
+    name: '', agent: SandboxArgs.AGENTS.includes(S.defaultAgent) ? S.defaultAgent : 'claude',
+    kits: [], kitDraft: '', recent: [...S.sandboxKits], workspaces: cwd ? [{ path: cwd, readOnly: false }] : [],
+    taken: [], busy: false, error: '', tried: false,
+  };
+  renderNewSandbox();
+  $('#sbx-name').focus();
+  newSbx.taken = (await api.sbxList().catch(() => [])).map(s => s.name);
+  refreshNewSandbox();
+}
+
+function closeNewSandbox() {
+  if ($('#sbx-new').hidden) return false;
+  $('#sbx-new').hidden = true;
+  if (!newSbx?.busy) newSbx = null;
+  focusPane(active, active?.focused);
+  return true;
+}
+
+const sbxName = d => d.name.trim() || SandboxArgs.defaultName(d.agent, d.workspaces);
+const sbxOpts = d => ({ name: sbxName(d), agent: d.agent, kits: d.kits, workspaces: d.workspaces });
+// The first problem stopping Create, or ''.
+const sbxProblem = d => SandboxArgs.nameError(sbxName(d), d.taken) || (d.workspaces.length ? '' : 'Add at least one workspace folder.');
+
+// Updates what depends on typing (name hint, command preview, Create button) without rebuilding the form.
+function refreshNewSandbox() {
+  const d = newSbx;
+  if (!d || $('#sbx-new').hidden) return;
+  const err = SandboxArgs.nameError(sbxName(d), d.taken);
+  const hint = $('#sbx-name-hint');
+  hint.textContent = err || (d.name.trim() ? 'Letters, numbers, hyphens and periods.' : `Leave blank to use "${sbxName(d)}".`);
+  hint.classList.toggle('invalid', !!err);
+  $('#sbx-name').setAttribute('aria-invalid', String(!!err));
+  $('#sbx-name').placeholder = SandboxArgs.defaultName(d.agent, d.workspaces);
+  $('#sbx-preview').textContent = SandboxArgs.preview(SandboxArgs.createArgs(sbxOpts(d)));
+  $('#sbx-create').disabled = d.busy || !!sbxProblem(d);
+}
+
+function addSandboxKit(ref) {
+  const d = newSbx;
+  ref = ref.trim();
+  if (!ref) return;
+  if (/^\.\.?[\\/]/.test(ref)) { d.kitError = 'Use a full path for a local kit (or Browse…).'; return renderNewSandbox('#sbx-kit-input'); }
+  if (ref.startsWith('-')) { d.kitError = 'A kit reference can\'t start with "-".'; return renderNewSandbox('#sbx-kit-input'); }
+  if (!d.kits.includes(ref)) d.kits.push(ref);
+  d.kitDraft = '';
+  d.kitError = '';
+  renderNewSandbox('#sbx-kit-input');
+}
+
+function addSandboxWorkspace(dir) {
+  const d = newSbx;
+  if (dir && !d.workspaces.some(w => w.path.toLowerCase() === dir.toLowerCase())) d.workspaces.push({ path: dir, readOnly: false });
+  renderNewSandbox();
+}
+
+// Rebuilds the form. focus: selector of the control to focus afterwards.
+function renderNewSandbox(focus) {
+  const d = newSbx;
+  const lock = { disabled: d.busy };
+  const section = (title, sub, ...body) => el('section', { className: 'sbx-section' },
+    el('div', { className: 'sbx-label' }, el('h3', { textContent: title }), sub && el('small', { textContent: sub })), ...body);
+  const iconButton = (text, label, run) => {
+    const b = el('button', { type: 'button', className: 'icon-btn', textContent: text, title: label, ariaLabel: label, ...lock });
+    b.onclick = run;
+    return b;
+  };
+
+  const name = el('input', { id: 'sbx-name', type: 'text', value: d.name, spellcheck: false, autocomplete: 'off', maxLength: 63, ...lock });
+  name.setAttribute('aria-describedby', 'sbx-name-hint');
+  name.oninput = () => { d.name = name.value; refreshNewSandbox(); };
+  const agent = select(d.agent, SandboxArgs.AGENTS.map(a => [a, agentDef(a)?.name || a]), v => { d.agent = v; refreshNewSandbox(); });
+  Object.assign(agent, { id: 'sbx-agent', ...lock });
+
+  const workspaces = el('ul', { className: 'sbx-list', ariaLabel: 'Workspaces' }, ...d.workspaces.map((w, i) => {
+    const ro = checkbox(w.readOnly, v => { w.readOnly = v; refreshNewSandbox(); }, lock);
+    return el('li', { className: 'sbx-item' },
+      el('span', { className: 'sbx-path', textContent: w.path, title: w.path }),
+      i === 0 && el('span', { className: 'sbx-badge', textContent: 'main', title: 'The agent starts in this folder' }),
+      el('label', { className: 'sbx-ro' }, ro, ' Read-only'),
+      iconButton('×', `Remove ${w.path}`, () => { d.workspaces.splice(i, 1); renderNewSandbox(); }));
+  }));
+  const addFolder = el('button', { type: 'button', className: 'secondary', textContent: '+ Add folder…', ...lock });
+  addFolder.onclick = async () => addSandboxWorkspace(await api.openFolder());
+
+  const kitInput = el('input', { id: 'sbx-kit-input', type: 'text', value: d.kitDraft, spellcheck: false, autocomplete: 'off',
+    placeholder: 'org/kit:latest, git+https://…, or a folder', ...lock });
+  kitInput.setAttribute('aria-label', 'Kit reference');
+  kitInput.oninput = () => { d.kitDraft = kitInput.value; };
+  kitInput.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addSandboxKit(kitInput.value); } };
+  const addKit = el('button', { type: 'button', className: 'secondary', textContent: 'Add', ...lock });
+  addKit.onclick = () => addSandboxKit(kitInput.value);
+  const browseKit = el('button', { type: 'button', className: 'secondary', textContent: 'Browse…', ...lock });
+  browseKit.onclick = async () => { const dir = await api.openFolder(); if (dir) addSandboxKit(dir); };
+  const chosen = d.kits.length && el('ul', { className: 'sbx-chips', ariaLabel: 'Kits to add' }, ...d.kits.map((k, i) =>
+    el('li', { className: 'sbx-chip on', title: k }, el('span', { textContent: k }),
+      iconButton('×', `Remove kit ${k}`, () => { d.kits.splice(i, 1); renderNewSandbox(); }))));
+  const recent = d.recent.filter(k => !d.kits.includes(k));
+  const recentList = recent.length && el('div', { className: 'sbx-recent' },
+    el('small', { textContent: 'Previously used' }),
+    el('ul', { className: 'sbx-chips', ariaLabel: 'Previously used kits' }, ...recent.map(k => {
+      const use = el('button', { type: 'button', className: 'sbx-chip-use', title: `Add ${k}`, ...lock }, el('span', { textContent: `+ ${k}` }));
+      use.onclick = () => addSandboxKit(k);
+      return el('li', { className: 'sbx-chip' }, use, iconButton('×', `Forget kit ${k}`, () => {
+        d.recent = d.recent.filter(x => x !== k);
+        set('sandboxKits', d.recent);
+        renderNewSandbox();
+      }));
+    })));
+
+  const close = iconButton('×', 'Close (Esc)', closeNewSandbox);
+  close.disabled = false; // closing while creating is fine: the tab still opens when it's done
+  close.classList.add('sbx-close');
+  const cancel = el('button', { type: 'button', className: 'secondary', textContent: d.busy ? 'Hide' : 'Cancel' });
+  cancel.onclick = closeNewSandbox;
+  const create = el('button', { id: 'sbx-create', type: 'submit', className: 'primary' },
+    d.busy ? el('span', { className: 'spinner', ariaHidden: 'true' }) : null, d.busy ? 'Creating…' : 'Create sandbox');
+
+  $('#sbx-new-box').replaceChildren(
+    el('header', { className: 'sbx-head' },
+      el('span', { className: 'sbx-head-icon', textContent: '⬢', ariaHidden: 'true' }),
+      el('div', {}, el('h2', { id: 'sbx-new-title', textContent: 'New sandbox' }),
+        el('p', { className: 'note', textContent: 'Run an agent in an isolated container that can only see the folders you attach.' })),
+      close),
+    el('div', { className: 'sbx-body' },
+      el('div', { className: 'sbx-grid' },
+        el('label', { className: 'sbx-field' }, el('span', { textContent: 'Name' }), name,
+          el('small', { id: 'sbx-name-hint', className: 'sbx-hint' })),
+        el('label', { className: 'sbx-field' }, el('span', { textContent: 'Agent' }), agent)),
+      section('Workspaces', 'Folders the sandbox can see. The first one is where the agent starts.',
+        d.workspaces.length ? workspaces : el('p', { className: 'sbx-empty' + (d.tried ? ' invalid' : ''), textContent: 'No folders yet. Add at least one.' }),
+        el('div', { className: 'row' }, addFolder)),
+      section('Kits', 'Optional. Mixins that add tools, settings or files to the sandbox.',
+        chosen || null,
+        el('div', { className: 'row sbx-kit-row' }, kitInput, addKit, browseKit),
+        d.kitError && el('small', { className: 'sbx-hint invalid', role: 'alert', textContent: d.kitError }),
+        recentList || null),
+      el('div', { className: 'sbx-preview-wrap' }, el('small', { textContent: 'Command' }), el('code', { id: 'sbx-preview' })),
+      d.error && el('div', { className: 'sbx-error', role: 'alert' }, el('strong', { textContent: 'Couldn\'t create the sandbox. ' }), d.error)),
+    el('footer', { className: 'sbx-foot' },
+      d.busy && el('small', { className: 'muted', textContent: 'The first sandbox can take a minute while images download.' }),
+      el('span', { className: 'spacer' }), cancel, create));
+  refreshNewSandbox();
+  if (focus) $(focus)?.focus();
+  $('.sbx-error')?.scrollIntoView({ block: 'nearest' });
+}
+
+$('#sbx-new-box').onsubmit = async e => {
+  e.preventDefault();
+  const d = newSbx;
+  if (!d || d.busy) return;
+  d.tried = true;
+  if (sbxProblem(d)) return renderNewSandbox();
+  if (d.kitDraft.trim()) addSandboxKit(d.kitDraft); // typed but not added yet: the user means it
+  if (d.kitError) return;
+  Object.assign(d, { busy: true, error: '' });
+  renderNewSandbox();
+  const opts = sbxOpts(d);
+  try {
+    await api.sbxCreate(opts);
+  } catch (err) {
+    d.busy = false;
+    d.error = String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    if (newSbx !== d || $('#sbx-new').hidden) { newSbx = null; return toast(`Couldn't create sandbox "${opts.name}": ${d.error}`); }
+    return renderNewSandbox();
+  }
+  if (opts.kits.length) set('sandboxKits', SandboxArgs.rememberKits(S.sandboxKits, opts.kits));
+  newSbx = null;
+  $('#sbx-new').hidden = true;
+  openSandboxTab({ args: ['run', '--name', opts.name], name: opts.name });
+};
+$('#sbx-new').onclick = e => { if (e.target.id === 'sbx-new') closeNewSandbox(); };
+
+// The sbx tab can't be closed while Docker Sandboxes support is on; switching it off removes the tab.
+const isPinnedSbx = tab => tab.type === 'sbx' && S.sandboxEnabled;
+
 function closeTab(tab) {
   const i = tabs.indexOf(tab);
-  if (i < 0) return;
+  if (i < 0 || isPinnedSbx(tab)) return;
   for (const p of tabPanes(tab)) p.dispose();
   tab.view.remove();
   tabs.splice(i, 1);
@@ -1172,8 +1359,11 @@ function tabItem(tab) {
     role: 'tab', tabIndex: 0, draggable: !isSbx,
   });
   item.setAttribute('aria-selected', String(tab === active));
-  const close = el('button', { className: 'tab-close', textContent: '×', title: 'Close tab', ariaLabel: `Close ${tabTitle(tab)}` });
-  close.onclick = e => { e.stopPropagation(); closeTab(tab); };
+  // The sbx tab can't be closed; its button creates a sandbox instead.
+  const close = isSbx
+    ? el('button', { className: 'tab-add', textContent: '+', title: 'New sandbox…', ariaLabel: 'New sandbox' })
+    : el('button', { className: 'tab-close', textContent: '×', title: 'Close tab', ariaLabel: `Close ${tabTitle(tab)}` });
+  close.onclick = e => { e.stopPropagation(); if (isSbx) openNewSandbox(); else closeTab(tab); };
   const title = el('span', { className: 'tab-title', textContent: tabTitle(tab) });
   title.ondblclick = () => startRename(tab, title);
   const state = tabState(tab);
@@ -1410,9 +1600,10 @@ function showTabMenu(tab, at) {
     !isSbx && 'Tab color', !isSbx && swatches, !isSbx && custom,
     !isSbx && tab.color && { label: 'Reset color', run: () => setTabColor(tab, null) },
     !isSbx && '-',
+    isSbx && { label: 'New sandbox…', run: openNewSandbox },
     tab.type === 'sandbox' && { label: 'Open shell in sandbox', run: () => { activate(tab); openSandboxShell(tab, tab.sandbox); } },
     { label: 'Rename tab', run: () => startRename(tab) },
-    { label: 'Close tab', run: () => closeTab(tab) },
+    !isPinnedSbx(tab) && { label: 'Close tab', run: () => closeTab(tab) },
   ]);
 }
 
@@ -1453,6 +1644,7 @@ $('#new-tab-menu').onclick = e => showMenu(e.currentTarget, [
   '-',
   { label: 'Open folder…', run: openFolderTab },
   S.sandboxEnabled && { label: 'Docker Sandboxes (sbx)', run: () => ensureSbxTab({ activate: true }) },
+  S.sandboxEnabled && { label: 'New sandbox…', run: openNewSandbox },
   { label: 'Settings', run: () => openSettings() },
 ]);
 
@@ -1567,7 +1759,7 @@ $('#palette').onclick = e => { if (e.target.id === 'palette') closePalette(); };
 
 function closeOverlays() {
   if (!$('#menu').hidden) { $('#menu').hidden = true; return true; }
-  return closePalette() || closeSettings() || closeFind();
+  return closeNewSandbox() || closePalette() || closeSettings() || closeFind();
 }
 
 // ---------------------------------------------------------------- form helpers
