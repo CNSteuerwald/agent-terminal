@@ -459,5 +459,21 @@ body[data-icon-anim="off"] .agent-icon *, body[data-icon-anim="off"] .agent-icon
 #sbx-preview { display: block; padding: 8px 10px; border-radius: 6px; background: var(--term-bg); border: 1px solid var(--border); font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .sbx-error { padding: 10px 12px; border: 1px solid var(--danger); border-radius: 8px; background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .sbx-foot { display: flex; gap: 8px; align-items: center; padding: 14px 24px; border-top: 1px solid var(--border); }
-.sbx-foot .primary { display: flex; align-items: center; gap: 8px; }
-.spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+
+/* ---------- sandbox create progress cards ---------- */
+#sbx-jobs { position: fixed; right: 16px; bottom: 48px; z-index: 36; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.sbx-job { position: relative; display: flex; gap: 12px; align-items: flex-start; padding: 12px 8px 14px 14px; background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--sbx); border-radius: 8px; box-shadow: 0 10px 28px #0007; overflow: hidden; pointer-events: auto; animation: modal-in .14s ease-out; }
+.sbx-job.ready { border-left-color: #3fb950; }
+.sbx-job.failed { border-left-color: var(--danger); }
+.sbx-job-icon { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 7px; background: var(--sbx-soft); color: #4d8bff; font-weight: 700; }
+.sbx-job.ready .sbx-job-icon { background: #3fb95026; color: #3fb950; }
+.sbx-job.failed .sbx-job-icon { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.sbx-job-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sbx-job-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbx-job-text small { color: var(--muted); overflow-wrap: anywhere; }
+.sbx-job-actions { display: flex; gap: 8px; margin-top: 8px; }
+.sbx-job-close { flex: 0 0 auto; margin-top: -4px; }
+/* The same sweep as a tab whose agent is working. */
+.sbx-job-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--sbx-soft); }
+.sbx-job-bar::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #4d8bff, transparent) no-repeat; background-size: 40% 100%; animation: sweep 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .sbx-job-bar::after { animation: none; background-size: 100% 100%; opacity: .5; } .sbx-job { animation: none; } }
