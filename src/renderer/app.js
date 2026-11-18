@@ -225,7 +225,9 @@ class Pane {
   }
 
   open() {
-    const t = this.term = new Terminal({ ...this.options(), allowProposedApi: true });
+    // linkHandler: OSC 8 hyperlinks (e.g. Aspire's dashboard link). xterm's default asks with confirm() and then
+    // calls window.open() with no URL, which the main process blocks, so the link never opened.
+    const t = this.term = new Terminal({ ...this.options(), allowProposedApi: true, linkHandler: { activate: (_e, uri) => api.openExternal(uri) } });
     this.fit = new FitAddon.FitAddon();
     this.search = new SearchAddon.SearchAddon();
     t.loadAddon(this.fit);
