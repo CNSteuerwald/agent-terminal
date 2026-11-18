@@ -216,6 +216,7 @@ ipcMain.on('pty:kill', (_e, id) => { ptys.get(id)?.proc.kill(); ptys.delete(id);
 ipcMain.handle('info:get', (_e, req) => getInfo(req));
 ipcMain.handle('info:usage', (_e, req) => agentUsage(req));
 ipcMain.handle('sbx:list', async () => sandbox.list(await sbxPath()));
+ipcMain.handle('sbx:create', async (_e, opts) => sandbox.create(await sbxPath(), opts));
 // What the setup wizard needs to know: which agent CLIs and sbx are installed.
 ipcMain.handle('setup:detect', async () => {
   const agents = {};

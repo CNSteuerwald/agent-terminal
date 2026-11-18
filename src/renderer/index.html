@@ -56,6 +56,11 @@
     <div id="wizard-box" role="dialog" aria-label="Setup"></div>
   </div>
 
+  <div id="sbx-new" class="overlay" hidden>
+    <form id="sbx-new-box" class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sbx-new-title" novalidate></form>
+  </div>
+
+  <div id="sbx-jobs" aria-label="Sandboxes being created"></div>
   <div id="toast" role="status" hidden></div>
   <div id="tab-tip" role="tooltip" hidden></div>
 
@@ -67,6 +72,7 @@
   <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="../shared/sandbox-args.js"></script>
   <script src="keys.js"></script>
   <script src="layout.js"></script>
   <script src="icons.js"></script>

@@ -36,6 +36,7 @@ const DEFAULTS = {
   restoreSession: true, // reopen the previous tabs (and resume agents) on launch
   sandboxEnabled: false, // Docker Sandboxes: pinned "sbx" tab running the sbx TUI
   sandboxCommand: 'sbx',
+  sandboxKits: [], // kit references used in "New sandbox", offered again next time
   defaultProfile: '',
   defaultAgent: 'claude',
   startingDirectory: '~',
