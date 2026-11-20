@@ -478,3 +478,5 @@ body[data-icon-anim="off"] .agent-icon *, body[data-icon-anim="off"] .agent-icon
 .sbx-job-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--sbx-soft); }
 .sbx-job-bar::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #4d8bff, transparent) no-repeat; background-size: 40% 100%; animation: sweep 2.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .sbx-job-bar::after { animation: none; background-size: 100% 100%; opacity: .5; } .sbx-job { animation: none; } }
+/* Settings → Agents: switched-off agents are dimmed (their switch stays bright). */
+tr.agent-off td:not(:first-child) { opacity: .45; }

@@ -111,6 +111,22 @@ test('detected shell profiles follow the default color scheme', () => {
   assert.deepEqual(s.templates, []);
 });
 
+test('switched-off agents stay listed; a switched-off default agent gives way', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'at-')), 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({ defaultAgent: 'claude', agents: [{ id: 'claude', enabled: false }] }));
+  let s = settings.load(file).settings;
+  assert.equal(s.agents.find(a => a.id === 'claude').enabled, false); // still there, so Settings can switch it back on
+  assert.equal(s.defaultAgent, 'copilot');
+  settings.update(file, { agents: [{ id: 'claude', enabled: true }] });
+  s = settings.load(file).settings;
+  assert.equal(s.defaultAgent, 'claude');
+  assert.equal(s.agents.find(a => a.id === 'claude').command, 'claude'); // toggling keeps the rest of the agent
+  fs.writeFileSync(file, JSON.stringify({ defaultAgent: '', agents: [{ id: 'copilot', enabled: false }] }));
+  assert.equal(settings.load(file).settings.defaultAgent, ''); // "None (shell only)" is kept
+  fs.writeFileSync(file, JSON.stringify({ agents: ['claude', 'copilot', 'codex', 'gemini', 'opencode'].map(id => ({ id, enabled: false })) }));
+  assert.equal(settings.load(file).settings.defaultAgent, '');
+});
+
 test('PATH is read back from reg query output', async () => {
   const out = '\r\nHKEY_CURRENT_USER\Environment\r\n    Path    REG_EXPAND_SZ    %USERPROFILE%\bin;C:\tools\r\n\r\n';
   assert.equal(settings.regValue(out), '%USERPROFILE%\bin;C:\tools');

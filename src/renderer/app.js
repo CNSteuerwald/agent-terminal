@@ -159,6 +159,8 @@ function xtermTheme(name) {
 //   | { kind: 'sbx' } | { kind: 'sandbox', sandbox },
 // plus optional cwd, title and resume.
 const agentDef = id => S.agents.find(a => a.id === id);
+// Agents switched on in Settings → Agents: the ones offered when creating tabs and panes.
+const shownAgents = () => S.agents.filter(a => a.enabled !== false);
 const PANE_ICONS = { shell: '›_', agent: '✦', command: '▶', sbx: '⬢', sandbox: '⧉' };
 
 // ---------------------------------------------------------------- agent icons
@@ -586,7 +588,7 @@ function openAgentPane(tab = active) {
   const agents = tabPanes(tab).filter(p => p.isAgent);
   if (agents.length) return focusPane(tab, agents[(agents.indexOf(tab.focused) + 1) % agents.length]);
   if (tab.type === 'sandbox') return addPane(tab, { kind: 'sandbox', sandbox: tab.sandbox });
-  const agentId = S.defaultAgent || S.agents[0]?.id;
+  const agentId = S.defaultAgent || shownAgents()[0]?.id;
   if (agentId) addPane(tab, { kind: 'agent', agentId });
 }
 
@@ -1113,7 +1115,7 @@ function showAddMenu(tab, g, anchor) {
     ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => add({ kind: 'shell', profile: p.name }) })),
     '-', 'Agent',
     tab.type === 'sandbox' && { label: `Sandbox: ${tab.sandbox.name}`, run: () => add({ kind: 'sandbox', sandbox: tab.sandbox }) },
-    ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
+    ...shownAgents().map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => add({ kind: 'agent', agentId: a.id }) })),
     ...(S.commands.length ? ['-', 'Command', ...S.commands.map(c => ({ label: c.name, run: () => add({ kind: 'command', command: c.name }) }))] : []),
     '-', 'Open new panes', seg,
   ]);
@@ -1684,7 +1686,7 @@ $('#new-tab-menu').onclick = e => showMenu(e.currentTarget, [
   '-', 'Shell',
   ...S.profiles.map(p => ({ label: p.name + (p.name === S.defaultProfile ? ' (default)' : ''), run: () => newTab({ profile: p.name }) })),
   '-', 'Agent',
-  ...S.agents.map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
+  ...shownAgents().map(a => ({ icon: iconEl(agentLook(a.id)), label: a.name + (a.id === S.defaultAgent ? ' (default)' : ''), run: () => newTab({ agent: a.id }) })),
   ...(S.commands.length ? ['-', 'Command', ...S.commands.map(c => ({ label: c.name, run: () => newTab({ command: c.name }) }))] : []),
   '-', 'Template',
   ...S.templates.map(t => ({ label: t.name + (t.name === S.defaultTemplate ? ' (default)' : ''), run: () => newTab({ template: t.name }) })),
@@ -1756,8 +1758,8 @@ function openPalette() {
     ...S.templates.map(t => ({ name: `New tab from template: ${t.name}`, run: () => newTab({ template: t.name }) })),
     { name: 'Save tab as template', run: saveTabAsTemplate },
     ...S.profiles.map(p => ({ name: `New terminal pane: ${p.name}`, run: () => addPane(active, { kind: 'shell', profile: p.name }) })),
-    ...S.agents.map(a => ({ name: `New agent pane: ${a.name}`, run: () => addPane(active, { kind: 'agent', agentId: a.id }) })),
-    ...S.agents.map(a => ({ name: `Switch agent: ${a.name}`, run: () => switchAgent(a.id) })),
+    ...shownAgents().map(a => ({ name: `New agent pane: ${a.name}`, run: () => addPane(active, { kind: 'agent', agentId: a.id }) })),
+    ...shownAgents().map(a => ({ name: `Switch agent: ${a.name}`, run: () => switchAgent(a.id) })),
     ...S.schemes.map(s => ({ name: `Color scheme: ${s.name}`, run: () => set('colorScheme', s.name) })),
     ...tabs.map(t => ({ name: `Go to tab: ${tabTitle(t)}`, hint: t.type === 'sbx' ? '' : shortPath(t.cwd), run: () => activate(t) })),
   ];
@@ -1900,7 +1902,7 @@ function saveTabAsTemplate() {
 }
 
 function templatesSection() {
-  const agentId = S.defaultAgent || S.agents[0]?.id;
+  const agentId = S.defaultAgent || shownAgents()[0]?.id;
   const starter = agentId
     ? { split: 'row', sizes: [0.5, 0.5], children: [{ panes: [{ kind: 'agent', agentId }] }, { panes: [{ kind: 'shell', profile: S.defaultProfile }] }] }
     : { panes: [{ kind: 'shell', profile: S.defaultProfile }] };
@@ -2053,7 +2055,7 @@ const SECTIONS = {
   General: () => [
     field('Default shell profile', select(S.defaultProfile, S.profiles.map(p => p.name), v => set('defaultProfile', v)),
       'Shell used in the terminal pane of new tabs.'),
-    field('Default agent', select(S.defaultAgent, [...S.agents.map(a => [a.id, a.name]), ['', 'None (shell only)']], v => set('defaultAgent', v)),
+    field('Default agent', select(S.defaultAgent, [...shownAgents().map(a => [a.id, a.name]), ['', 'None (shell only)']], v => set('defaultAgent', v)),
       'Agent CLI started in the agent pane of new tabs.'),
     field('Starting directory', el('div', { className: 'row' },
       input(S.startingDirectory, v => set('startingDirectory', v)), browseButton(d => set('startingDirectory', d))),
@@ -2128,10 +2130,11 @@ const SECTIONS = {
         el('td', { className: 'muted', textContent: [p.commandline, ...(p.args || [])].join(' ') })))),
   ],
   Agents: () => [
-    el('p', { className: 'note', textContent: 'The agent pane runs this command in your shell, exactly as if you typed it. Add flags such as --model or --continue here. Click an icon to give the agent its own look and color; it animates in the sidebar and on its pane while the agent works.' }),
+    el('p', { className: 'note', textContent: 'The agent pane runs this command in your shell, exactly as if you typed it. Add flags such as --model or --continue here. Click an icon to give the agent its own look and color; it animates in the sidebar and on its pane while the agent works. Switch off agents you don\'t use to leave them out of the New tab group menu, a pane\'s + menu and the palette.' }),
     el('table', { className: 'list' },
-      el('tr', {}, el('th', { textContent: 'Icon' }), el('th', { textContent: 'Agent' }), el('th', { textContent: 'Command' })),
-      ...S.agents.map(a => el('tr', {},
+      el('tr', {}, el('th', { textContent: 'Show' }), el('th', { textContent: 'Icon' }), el('th', { textContent: 'Agent' }), el('th', { textContent: 'Command' })),
+      ...S.agents.map(a => el('tr', { className: a.enabled === false ? 'agent-off' : '' },
+        el('td', {}, toggle(a.enabled !== false, v => set('agents', [{ id: a.id, enabled: v }]), { ariaLabel: `Show ${a.name}`, title: `Show ${a.name} when creating tabs and panes` })),
         el('td', {}, iconButton(a)),
         el('td', { textContent: a.name }),
         el('td', {}, Object.assign(input(a.command, v => v.trim() && set('agents', [{ id: a.id, command: v.trim() }])), { className: 'command' }))))),
@@ -2206,7 +2209,7 @@ async function runWizard() {
   const detect = await api.detectSetup().catch(() => ({ agents: {}, sbx: false }));
   return new Promise(resolve => {
     const installed = id => detect.agents[id];
-    const firstInstalled = S.agents.find(a => installed(a.id))?.id;
+    const firstInstalled = shownAgents().find(a => installed(a.id))?.id;
     const d = {
       defaultAgent: S.setupComplete || installed(S.defaultAgent) ? S.defaultAgent : firstInstalled || S.defaultAgent,
       defaultProfile: S.defaultProfile, startingDirectory: S.startingDirectory,
@@ -2223,7 +2226,7 @@ async function runWizard() {
     const steps = [
       ['Choose your default agent', 'Each tab runs this agent CLI next to your shell, exactly as it looks in a normal terminal. You can switch per tab later.', () => [
         el('div', { className: 'choices' },
-          ...S.agents.map(a => radio('agent', a.id, d.defaultAgent, a.name,
+          ...shownAgents().map(a => radio('agent', a.id, d.defaultAgent, a.name,
             installed(a.id) ? `Installed · runs "${a.command}"` : `Not found on PATH ("${a.command}")`, v => { d.defaultAgent = v; }, false,
             iconEl(agentLook(a.id), 'working'))),
           radio('agent', '', d.defaultAgent, 'None', 'Tabs open with only a shell', v => { d.defaultAgent = v; })),

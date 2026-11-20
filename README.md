@@ -280,10 +280,12 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "confirmOnClose": true,                  // ask before closing a window with several tabs ("Don't ask me again" sets false)
   "restoreSession": true,                  // reopen tabs on launch
 
-  // Agents merge with the built-ins by id. Add your own or change a command.
+  // Agents merge with the built-ins by id. Add your own or change a command. "enabled": false (the Show switch in
+  // Settings → Agents) leaves an agent out of the New tab group menu, the + menu and the palette.
   "agents": [
     { "id": "claude", "command": "claude --model opus" },
-    { "id": "aider", "name": "Aider", "command": "aider --no-auto-commits", "icon": "cat", "iconColor": "#3FB950" }
+    { "id": "aider", "name": "Aider", "command": "aider --no-auto-commits", "icon": "cat", "iconColor": "#3FB950" },
+    { "id": "gemini", "enabled": false }
   ],
 
   // Shell profiles merge with the detected ones by name. "hidden": true removes one.
