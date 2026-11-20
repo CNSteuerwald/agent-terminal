@@ -4,20 +4,12 @@
 // installs silently when the app quits, or right away via the bar's "Restart now" (update:install),
 // which shows a small "Updating" window until the new version opens (update-splash.js).
 const { app, BrowserWindow, ipcMain } = require('electron');
-const { execFile } = require('child_process');
 const { showUpdateSplash } = require('./update-splash');
 
 const CHECK_EVERY_MS = 15 * 60 * 1000;
 
 let status = null; // null | { state: 'downloading' | 'ready', version, percent }
 let autoUpdater = null;
-
-// shortcut: the repo is private, so release downloads need a GitHub token; we borrow the user's
-// GitHub CLI login (`gh auth login`). Remove this (and `private: true` in package.json) once the repo is public.
-function ghToken() {
-  return new Promise(resolve => execFile('gh', ['auth', 'token'], { windowsHide: true, timeout: 10000 },
-    (err, out) => resolve(err ? '' : out.trim())));
-}
 
 function setStatus(next) {
   status = next;
@@ -42,9 +34,6 @@ function start({ beforeInstall }) {
 async function run() {
   if (!app.isPackaged) return; // `npm start` runs from source; nothing to update
   ({ autoUpdater } = require('electron-updater'));
-  process.env.GH_TOKEN ||= await ghToken();
-  if (!process.env.GH_TOKEN) return; // not signed in to gh: updates are manual (README → Updating)
-
   autoUpdater.autoInstallOnAppQuit = true; // "Later" = installs on the next quit, so the next launch is updated
   autoUpdater.on('update-available', info => setStatus({ state: 'downloading', version: info.version, percent: 0 }));
   autoUpdater.on('download-progress', p => {
