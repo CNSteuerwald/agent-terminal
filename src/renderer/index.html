@@ -24,9 +24,12 @@
         <select id="zoom-level" aria-label="Zoom level"></select>
         <button id="zoom-reset" title="Back to the font size in settings (Ctrl+0)" hidden>Reset</button>
       </span>
+      <button id="notif-btn" title="Notifications (Ctrl+Shift+B)" aria-label="Notifications" aria-haspopup="dialog"><span class="bell" aria-hidden="true"></span><span id="notif-count"></span></button>
       <button id="settings-btn" title="Settings (Ctrl+,)" aria-label="Settings">⚙</button>
     </div>
   </div>
+
+  <div id="notif-panel" class="popup" role="dialog" aria-label="Notifications" hidden></div>
 
   <div id="menu" class="popup" role="menu" hidden></div>
 

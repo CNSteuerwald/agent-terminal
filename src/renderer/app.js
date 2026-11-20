@@ -92,6 +92,8 @@ const ACTIONS = {
   commandPalette: ['Command palette', 'ctrl+shift+p', openPalette],
   openSbx: ['Open Docker Sandboxes (sbx) tab', '', () => ensureSbxTab({ activate: true })],
   newSandbox: ['New Docker sandbox…', '', () => openNewSandbox()],
+  toggleNotifications: ['Notifications', 'ctrl+shift+b', () => toggleNotices()],
+  jumpToUnread: ['Go to the latest unread notification', 'ctrl+shift+u', () => jumpToUnread()],
   openSettings: ['Open settings', 'ctrl+,', () => openSettings()],
   openSettingsFile: ['Open settings file (JSON)', 'ctrl+shift+,', () => api.openSettingsFile('user')],
   openDefaultSettingsFile: ['Open default settings (read-only)', 'ctrl+alt+,', () => api.openSettingsFile('defaults')],
@@ -197,6 +199,10 @@ class Pane {
     this.cwd = spec.cwd || tab.cwd;   // shells: live folder; agents: where they started
     this.customTitle = spec.title || null;
     this.resume = !!spec.resume;      // next start resumes the agent's last conversation (restored tabs)
+    this.prompt = spec.prompt || '';  // first message for the agent (atx open/split --prompt); used once
+    this.status = null;               // { text, progress } from atx status or OSC 9;4
+    this.hooked = false;              // its agent reports through hooks (see control.js), so idle guesses aren't needed
+    this.lastNotice = null;           // its latest notification
     this.ptyId = null;
     this.exited = false;
     this.lastInput = 0;   // output right after input/resize/focus is an echo or redraw, not agent work
@@ -258,13 +264,34 @@ class Pane {
     t.onBell(() => { if (this.tab !== active) { this.tab.attention = true; renderTabs(); } });
     t.onTitleChange(title => { this.title = title; updatePaneTab(this); });
     t.textarea.addEventListener('focus', () => { this.lastInput = Date.now(); setFocused(this.tab, this); });
+    // OSC 9: "9;<dir>" is the shell's folder at each prompt (shell integration in settings.js), "4;<state>;<n>"
+    // is progress (Windows Terminal / ConEmu), anything else is a notification (iTerm2).
+    t.parser.registerOscHandler(9, data => {
+      const cwd = data.match(/^9;"?([^"]*)"?$/);
+      if (cwd) { if (this.kind === 'shell') setPaneCwd(this, cwd[1]); return true; }
+      const progress = data.match(/^4;(\d)(?:;(\d{1,3}))?/);
+      if (progress) return setOscProgress(this, Number(progress[1]), Number(progress[2] || 0)), true;
+      if (data.trim()) addNotice(this, { level: 'attention', title: '', message: data, source: 'terminal' });
+      return true;
+    });
+    // OSC 777;notify;<title>;<body> (urxvt, Ghostty, foot) and OSC 99 (kitty) notifications.
+    t.parser.registerOscHandler(777, data => {
+      const [kind, title = '', ...body] = data.split(';');
+      if (kind === 'notify') addNotice(this, { level: 'attention', title, message: body.join(';') || title, source: 'terminal' });
+      return true;
+    });
+    t.parser.registerOscHandler(99, data => {
+      const i = data.indexOf(';');
+      const meta = Object.fromEntries(data.slice(0, i).split(':').map(kv => kv.split('=')));
+      const text = data.slice(i + 1);
+      if (i < 0 || meta.e === '1') return true; // base64 payloads aren't worth the trouble
+      if (meta.p === 'title' && meta.d === '0') { this.oscTitle = text; return true; }
+      if (meta.p === 'title') addNotice(this, { level: 'attention', title: '', message: text, source: 'terminal' });
+      else addNotice(this, { level: 'attention', title: this.oscTitle || '', message: text || this.oscTitle || '', source: 'terminal' });
+      this.oscTitle = '';
+      return true;
+    });
     if (this.kind === 'shell') {
-      // The shell reports its folder at each prompt (see shell integration in settings.js).
-      t.parser.registerOscHandler(9, data => {
-        const m = data.match(/^9;"?([^"]*)"?$/);
-        if (m) setPaneCwd(this, m[1]);
-        return !!m; // other OSC 9 messages (notifications) are not ours
-      });
       t.parser.registerOscHandler(7, data => {
         try { setPaneCwd(this, decodeURIComponent(new URL(data).pathname)); } catch { /* not a file URL */ }
         return true;
@@ -353,7 +380,7 @@ class Pane {
   spawnRequest() {
     const base = { kind: this.kind, cwd: this.cwd, cols: this.term.cols, rows: this.term.rows };
     if (this.kind === 'shell') return { ...base, name: this.profile };
-    if (this.kind === 'agent') return { ...base, name: this.agentId, resume: this.resume };
+    if (this.kind === 'agent') return { ...base, name: this.agentId, resume: this.resume, prompt: this.prompt };
     if (this.kind === 'sandbox') return { ...base, name: this.sandbox.name, args: this.sandbox.args };
     if (this.kind === 'command') return { ...base, name: this.command };
     return base; // sbx
@@ -374,7 +401,9 @@ class Pane {
       if (this.kind === 'agent') { this.agentStarted = Date.now(); this.resumed = this.resume; this.usage = null; }
       this.resume = false;
       // Agents only work after you give them something: startup banners and resumed history don't count.
-      this.armed = false;
+      // A starting prompt is something.
+      this.armed = !!this.prompt;
+      this.prompt = '';
       this.ptyId = id;
       // Resizes during the await were dropped (no ptyId yet); otherwise the shell keeps the old row count.
       api.resize(id, this.term.cols, this.term.rows);
@@ -405,7 +434,14 @@ class Pane {
 
   restart() { this.kill(); this.start(); }
 
-  dispose() { this.disposed = true; this.kill(); this.term?.dispose(); this.el.remove(); }
+  dispose() {
+    this.disposed = true;
+    this.kill();
+    this.term?.dispose();
+    this.el.remove();
+    // A closed pane's news no longer needs you: it stays in the list (marked closed) but stops counting.
+    if (notices.some(n => n.pane === this && !n.read)) { for (const n of notices) if (n.pane === this) n.read = true; renderNotices(); }
+  }
 }
 
 const paneJson = p => ({ kind: p.kind, profile: p.profile, agentId: p.agentId, sandbox: p.sandbox, command: p.command, cwd: p.cwd, title: p.customTitle });
@@ -481,7 +517,7 @@ function initialLayout(tab, o) {
   const shell = o.shell !== false && tab.type !== 'sbx' && new Pane(tab, { kind: 'shell', profile: o.profile, cwd: tab.cwd });
   const agentSpec = tab.type === 'sbx' ? { kind: 'sbx' }
     : tab.type === 'sandbox' ? { kind: 'sandbox', sandbox: tab.sandbox }
-      : o.agentId && o.agent !== false && { kind: 'agent', agentId: o.agentId, cwd: o.agentCwd || tab.cwd, resume: o.resume };
+      : o.agentId && o.agent !== false && { kind: 'agent', agentId: o.agentId, cwd: o.agentCwd || tab.cwd, resume: o.resume, prompt: o.prompt };
   const agent = agentSpec && new Pane(tab, agentSpec);
   if (!shell || !agent) return Layout.group([shell || agent].filter(Boolean));
   const pos = ['left', 'right', 'top', 'bottom'].includes(o.position || S.agentPanePosition) ? o.position || S.agentPanePosition : 'right';
@@ -875,6 +911,332 @@ function renderSbxJobs() {
   }));
 }
 
+// ---------------------------------------------------------------- notification center
+// Notifications come from agent hooks (exact: "needs your permission", "finished"), atx notify, and the
+// notification escape codes terminal apps send (OSC 9 / 777 / 99). Each belongs to a pane. Unread ones show
+// in the sidebar, on the bell in the bottom bar, as a Windows notification while the window isn't focused,
+// and on the taskbar. Focusing a pane reads its notifications.
+const notices = [];         // newest last: { id, pane, tab, level, title, message, source, time, read }
+let noticeSeq = 0;
+const NOTICE_LIMIT = 200;
+const NOTICE_TITLES = { attention: 'Needs you', done: 'Finished', info: 'Note' };
+const counts = n => n.level !== 'info';  // info notes are kept but don't count as unread
+
+// The pane is in front of the user right now.
+const paneInView = p => document.hasFocus() && p.tab === active && active.focused === p && $('#settings').hidden;
+
+function addNotice(pane, { level, title, message, source }) {
+  const now = Date.now();
+  message = String(message || '').trim();
+  title = String(title || '').trim() || NOTICE_TITLES[level];
+  // The same news twice (e.g. a hook and the agent's own escape code) is shown once.
+  if (notices.some(n => n.pane === pane && n.message === message && now - n.time < 4000)) return null;
+  const n = { id: ++noticeSeq, pane, tab: pane.tab, level, title, message, source, time: now, read: paneInView(pane) };
+  notices.push(n);
+  if (notices.length > NOTICE_LIMIT) notices.splice(0, notices.length - NOTICE_LIMIT);
+  pane.lastNotice = n;
+  if (source === 'hook') pane.hooked = true;
+  if (!n.read && level === 'attention') pane.tab.attention = true;
+  if (!n.read && level === 'done' && pane.tab !== active) pane.tab.done = true;
+  if (level === 'done' || level === 'attention') pane.status = null; // a status like "Running tests" is over
+  if (!n.read && counts(n) && !document.hasFocus()) {
+    if (S.notifications.desktop) api.showNotification({ title: `${tabTitle(pane.tab)} · ${title}`, body: message || pane.label(), pane: pane.ptyId });
+    if (S.notifications.flash) api.flashFrame();
+  }
+  checkWaiters();
+  renderNotices();
+  renderTabs();
+  updatePaneInfo(pane);
+  return n;
+}
+
+// Reads a pane's notifications, and clears its tab's markers once nothing in the tab is unread.
+function readPane(p) {
+  let changed = false;
+  for (const n of notices) if (n.pane === p && !n.read) { n.read = true; changed = true; }
+  if (!changed) return;
+  const tab = p.tab;
+  if (!notices.some(n => n.tab === tab && !n.read && n.level === 'attention')) tab.attention = false;
+  renderNotices();
+  renderTabs();
+}
+
+const unreadNotices = () => notices.filter(n => !n.read && counts(n));
+const latestUnread = tab => notices.findLast(n => n.tab === tab && !n.read && counts(n));
+
+function jumpToNotice(n) {
+  closeNotices();
+  if (!tabPanes(n.tab).includes(n.pane) || !tabs.includes(n.tab)) { n.read = true; renderNotices(); return notify('That pane is closed.'); }
+  activate(n.tab);
+  focusPane(n.tab, n.pane);
+  readPane(n.pane);
+}
+
+function jumpToUnread() {
+  const n = unreadNotices().findLast(x => tabs.includes(x.tab) && tabPanes(x.tab).includes(x.pane));
+  if (n) jumpToNotice(n);
+  else notify('No unread notifications');
+}
+
+const agoShort = ms => (ms < 60000 ? 'now' : ms < 3600000 ? `${Math.floor(ms / 60000)} min` : ms < 86400000 ? `${Math.floor(ms / 3600000)} h` : `${Math.floor(ms / 86400000)} d`);
+
+// The bell's count, the taskbar badge, and the panel when it's open.
+let lastBadge = '';
+function renderNotices() {
+  const unread = unreadNotices();
+  const attention = unread.some(n => n.level === 'attention');
+  const btn = $('#notif-btn');
+  btn.classList.toggle('has-unread', unread.length > 0);
+  btn.classList.toggle('attention', attention);
+  $('#notif-count').textContent = unread.length ? (unread.length > 99 ? '99+' : String(unread.length)) : '';
+  btn.title = unread.length ? `${unread.length} unread notification${unread.length === 1 ? '' : 's'} (Ctrl+Shift+B)` : 'Notifications (Ctrl+Shift+B)';
+  btn.ariaLabel = btn.title;
+  const badge = S.notifications.badge && unread.length ? `${unread.length}:${attention}` : '';
+  if (badge !== lastBadge) { lastBadge = badge; api.setBadge(badge ? badgeImage(unread.length, attention) : null, badge ? btn.title : ''); }
+  if (!$('#notif-panel').hidden) renderNoticePanel();
+}
+
+// The taskbar overlay: a 32px circle with the unread count (Windows scales it to the overlay size).
+function badgeImage(count, attention) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d');
+  g.fillStyle = attention ? '#f5a623' : '#3fb950';
+  g.beginPath(); g.arc(16, 16, 15, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#111';
+  g.font = `bold ${count > 9 ? 17 : 22}px "Segoe UI", sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(count > 9 ? '9+' : String(count), 16, 17);
+  return c.toDataURL('image/png');
+}
+
+function renderNoticePanel() {
+  const panel = $('#notif-panel');
+  const now = Date.now();
+  const list = notices.slice().reverse();
+  const markAll = el('button', { type: 'button', textContent: 'Mark all read', disabled: !notices.some(n => !n.read) });
+  markAll.onclick = () => { for (const n of notices) n.read = true; for (const t of tabs) t.attention = false; renderNotices(); renderTabs(); };
+  const clear = el('button', { type: 'button', textContent: 'Clear', disabled: !notices.length });
+  clear.onclick = () => { notices.length = 0; for (const t of tabs) t.attention = false; renderNotices(); renderTabs(); };
+  panel.replaceChildren(
+    el('header', { className: 'notif-head' }, el('strong', { textContent: 'Notifications' }), el('span', { className: 'spacer' }), markAll, clear),
+    list.length
+      ? el('ul', { className: 'notif-list', role: 'list' }, ...list.map(n => {
+        const alive = tabs.includes(n.tab) && tabPanes(n.tab).includes(n.pane);
+        const icon = n.pane.isAgent ? iconEl(paneLook(n.pane), n.level === 'attention' ? 'attention' : n.level === 'done' ? 'done' : '')
+          : el('span', { className: 'notif-glyph', textContent: PANE_ICONS[n.pane.kind] || '•', ariaHidden: 'true' });
+        const b = el('button', { type: 'button', className: `notif-item ${n.level}${n.read ? '' : ' unread'}${alive ? '' : ' gone'}`, title: alive ? 'Go to this pane' : 'This pane is closed' },
+          el('span', { className: 'notif-icon' }, icon),
+          el('span', { className: 'notif-text' },
+            el('span', { className: 'notif-line' }, el('strong', { textContent: n.title }), el('small', { textContent: agoShort(now - n.time) })),
+            el('small', { className: 'notif-where', textContent: `${tabTitle(n.tab)} · ${n.pane.label()}${alive ? '' : ' (closed)'}` }),
+            n.message && el('span', { className: 'notif-msg', textContent: n.message })));
+        b.onclick = () => jumpToNotice(n);
+        return el('li', {}, b);
+      }))
+      : el('p', { className: 'notif-empty' }, 'No notifications yet. Agents you start here report when they need you or finish; scripts can use ',
+        el('code', { textContent: 'atx notify' }), '.'));
+}
+
+function toggleNotices() {
+  const panel = $('#notif-panel');
+  if (!panel.hidden) return closeNotices();
+  panel.hidden = false;
+  renderNoticePanel();
+  panel.querySelector('.notif-item, button')?.focus();
+}
+function closeNotices() {
+  if ($('#notif-panel').hidden) return false;
+  $('#notif-panel').hidden = true;
+  return true;
+}
+$('#notif-btn').onclick = toggleNotices;
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#notif-panel, #notif-btn')) closeNotices(); });
+window.addEventListener('focus', () => { const p = active && focusedPane(active); if (p) readPane(p); });
+api.onNotificationClick(id => { const n = notices.findLast(x => x.pane.ptyId === id); if (n) jumpToNotice(n); });
+setInterval(() => { if (!$('#notif-panel').hidden) renderNoticePanel(); }, 30000); // keeps "5 min" current
+
+// OSC 9;4 progress: 0 clears, 1 sets n%, 2 error, 3 working (no number), 4 paused.
+function setOscProgress(p, state, n) {
+  p.status = state === 0 ? null : { text: state === 2 ? 'Error' : state === 4 ? 'Paused' : '', progress: state === 3 ? null : clamp(n, 0, 100), osc: true };
+  updatePaneInfo(p);
+  renderTabs();
+}
+
+// ---------------------------------------------------------------- atx commands (see main/control.js)
+const waiters = []; // atx wait: { pane, since, resolve, timer }
+
+function paneById(id) {
+  const p = panes.get(id);
+  if (!p || p.disposed) throw new Error(`No pane ${id}. Run "atx list" to see pane ids.`);
+  return p;
+}
+
+// Resolves once a new pane has its process (and so its id).
+function paneStarted(p) {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    (function poll() {
+      if (p.ptyId) return resolve(p);
+      if (p.exited || p.disposed) return reject(new Error('The pane failed to start.'));
+      if (Date.now() - t0 > 30000) return reject(new Error('The pane took too long to start.'));
+      setTimeout(poll, 50);
+    })();
+  });
+}
+
+function paneInfo(p) {
+  const [, label] = paneState(p, Date.now());
+  return {
+    id: p.ptyId, kind: p.kind, name: p.name(), agent: p.agentId || p.sandbox?.agent || null, title: p.customTitle || null,
+    cwd: p.cwd || null, state: p.exited ? 'Exited' : label || null, status: p.status ? statusText(p.status) : null,
+    unread: notices.filter(n => n.pane === p && !n.read && counts(n)).length,
+  };
+}
+
+// What to run in a new pane, from atx open/split options.
+function launchSpecOf(c) {
+  if (c.agent !== undefined) {
+    const a = agentDef(c.agent);
+    if (!a) throw new Error(`Unknown agent "${c.agent}". Agents: ${S.agents.map(x => x.id).join(', ')}.`);
+    if (c.prompt && typeof a.promptArg !== 'string') throw new Error(`${a.name} can't be started with a prompt. Start it without --prompt, then use atx send.`);
+    return { kind: 'agent', agentId: a.id, prompt: c.prompt };
+  }
+  if (c.shell !== undefined) {
+    if (!S.profiles.some(p => p.name === c.shell)) throw new Error(`Unknown shell profile "${c.shell}". Profiles: ${S.profiles.map(p => p.name).join(', ')}.`);
+    return { kind: 'shell', profile: c.shell };
+  }
+  if (c.command !== undefined) {
+    if (!S.commands.some(x => x.name === c.command)) throw new Error(`Unknown command tab "${c.command}". See Settings → Commands.`);
+    return { kind: 'command', command: c.command };
+  }
+  return null;
+}
+
+async function openFromControl(c) {
+  if (c.template !== undefined && !S.templates.some(t => t.name === c.template)) throw new Error(`Unknown template "${c.template}".`);
+  const spec = launchSpecOf(c);
+  if (c.prompt && !spec) {
+    const def = agentDef(S.defaultAgent);
+    if (!def) throw new Error('--prompt needs an agent: there is no default agent. Add --agent.');
+    if (typeof def.promptArg !== 'string') throw new Error(`${def.name} can't be started with a prompt.`);
+  }
+  const prev = active;
+  const o = { type: 'workspace', cwd: c.cwd, title: c.title || null };
+  let tab;
+  if (c.template !== undefined) tab = await createTab({ ...o, layout: S.templates.find(t => t.name === c.template).layout });
+  else if (spec?.kind === 'command') tab = await createTab({ ...o, title: c.title || spec.command, layout: { panes: [spec] } });
+  else if (spec?.kind === 'shell') tab = await createTab({ ...o, profile: spec.profile, agent: false });
+  else tab = await createTab({ ...o, agentId: spec?.agentId ?? S.defaultAgent, prompt: spec?.prompt ?? c.prompt });
+  // Panes only start in a visible tab (xterm measures its cells), so a background tab is shown for a moment.
+  if (c.background && prev && tabs.includes(prev)) activate(prev);
+  const all = await Promise.all(tabPanes(tab).map(paneStarted));
+  const lead = all.find(p => p.isAgent) || all[0];
+  return { tab: tab.id, pane: lead?.ptyId ?? null, panes: all.map(paneInfo) };
+}
+
+async function splitFromControl(c) {
+  const target = paneById(c.target);
+  const spec = launchSpecOf(c) || (c.prompt ? launchSpecOf({ agent: S.defaultAgent, prompt: c.prompt }) : { kind: 'shell', profile: S.defaultProfile });
+  if (target.tab.type === 'sbx') throw new Error('The sbx tab has no room for other panes.');
+  const p = addPane(target.tab, { ...spec, cwd: target.cwd }, { group: Layout.groupOf(target.tab.root, target), placement: c.down ? 'down' : 'right' });
+  await paneStarted(p);
+  return { pane: p.ptyId, ...paneInfo(p) };
+}
+
+function waitForPane(c) {
+  const p = paneById(c.target);
+  if (!p.isAgent) throw new Error(`Pane ${c.target} isn't an agent. atx wait waits for agents.`);
+  return new Promise(resolve => {
+    const w = { pane: p, since: Date.now(), resolve: null, timer: 0 };
+    w.resolve = r => { clearTimeout(w.timer); waiters.splice(waiters.indexOf(w), 1); resolve(r); };
+    w.timer = setTimeout(() => w.resolve({ state: 'timeout', message: '' }), c.timeout * 1000);
+    waiters.push(w);
+    checkWaiters();
+  });
+}
+
+// An agent is done waiting for when its hook says so, it needs the user, it exits, or (without hooks) its
+// output has stopped for a while after it worked.
+function checkWaiters() {
+  const now = Date.now();
+  for (const w of waiters.slice()) {
+    const p = w.pane, n = p.lastNotice;
+    if (p.disposed || p.exited) w.resolve({ state: 'exited', message: '' });
+    else if (n && n.time >= w.since && n.level !== 'info') w.resolve({ state: n.level, message: n.message, title: n.title });
+    else if (!p.hooked && p.lastWork > w.since && now - p.lastWork > 5000) w.resolve({ state: 'idle', message: '' });
+  }
+}
+
+function readFromPane(c) {
+  const p = paneById(c.target);
+  const buf = p.term.buffer.active;
+  const lines = [];
+  for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? '');
+  while (lines.length && !lines.at(-1).trim()) lines.pop();
+  return { text: lines.slice(-c.lines).join('\n') };
+}
+
+async function runControl(c) {
+  const caller = c.caller != null ? panes.get(c.caller) : null;
+  const self = () => { if (!caller) throw new Error('Run this inside an Agent Terminal pane.'); return caller; };
+  switch (c.cmd) {
+    case 'notify': return addNotice(self(), c) ? {} : { duplicate: true };
+    case 'status': {
+      const p = self();
+      p.status = c.clear || (!c.text && c.progress == null) ? null : { text: c.text, progress: c.progress };
+      updatePaneInfo(p);
+      renderTabs();
+      return {};
+    }
+    case 'turn': { // the user (or atx send) gave the agent a new prompt
+      const p = self();
+      p.hooked = true;
+      p.armed = true;
+      readPane(p);
+      return {};
+    }
+    case 'list': return { tabs: tabs.map(t => ({ id: t.id, title: tabTitle(t), type: t.type, cwd: t.type === 'sbx' ? null : t.cwd, active: t === active, panes: tabPanes(t).map(paneInfo) })) };
+    case 'open': return openFromControl(c);
+    case 'split': return splitFromControl(c);
+    case 'focus': {
+      const p = paneById(c.target);
+      activate(p.tab);
+      focusPane(p.tab, p);
+      return {};
+    }
+    case 'send': {
+      const p = paneById(c.target);
+      if (!p.ptyId) throw new Error(`Pane ${c.target} isn't running.`);
+      p.lastInput = Date.now();
+      if (p.isAgent) p.armed = true;
+      api.write(p.ptyId, c.text);
+      // Agent TUIs treat one big write as a paste; Enter on its own then submits it.
+      if (c.enter) setTimeout(() => { if (p.ptyId) api.write(p.ptyId, '\r'); }, 150);
+      return {};
+    }
+    case 'read': return readFromPane(c);
+    case 'wait': return waitForPane(c);
+    case 'close': {
+      const p = paneById(c.target);
+      if (isPinnedSbx(p.tab)) throw new Error('The sbx tab can\'t be closed.');
+      closePane(p);
+      return {};
+    }
+    default: throw new Error(`Unknown command ${c.cmd}.`);
+  }
+}
+
+api.onControl(async (id, c) => {
+  try {
+    api.controlReply(id, { ok: true, result: (await runControl(c)) || {} });
+  } catch (e) {
+    api.controlReply(id, { ok: false, error: e.message || 'Failed.' });
+  }
+});
+
+const statusText = s => [s.text, s.progress != null && `${s.progress}%`].filter(Boolean).join(' ') || 'Working…';
+
 // The sbx tab can't be closed while Docker Sandboxes support is on; switching it off removes the tab.
 const isPinnedSbx = tab => tab.type === 'sbx' && S.sandboxEnabled;
 
@@ -931,6 +1293,7 @@ function focusPane(tab, pane) {
 // Records which pane has focus. Focusing a terminal also points the sidebar at its folder.
 function setFocused(tab, pane) {
   tab.focused = pane;
+  if (tab === active && document.hasFocus()) readPane(pane);
   if (pane.kind === 'shell' && tab.cwdPane !== pane) {
     tab.cwdPane = pane;
     if (tab.cwd !== pane.cwd) { tab.cwd = pane.cwd; renderTabs(); refreshInfo([tab]); }
@@ -1025,6 +1388,12 @@ function updatePaneTab(p) {
   updatePaneInfo(p);
 }
 
+// A status from atx status or OSC 9;4: its text and, with a percentage, a small bar.
+function statusItem(st) {
+  const bar = st.progress != null && el('span', { className: 'ph-bar' }, el('span', { style: `width:${st.progress}%` }));
+  return el('span', { className: 'ph-item ph-ctl', title: statusText(st) }, st.text || (st.progress == null ? 'Working…' : ''), bar || null, st.progress != null ? ` ${st.progress}%` : '');
+}
+
 const fmtTokens = n => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}K`);
 
 // The header's details, per the paneHeader setting. Context and cost come from Claude Code's transcript.
@@ -1044,12 +1413,15 @@ function updatePaneInfo(p) {
       const bar = el('span', { className: 'ph-bar' }, el('span', { style: `width:${pct}%` }));
       items.push(el('span', { className: 'ph-item ph-context', title: `${fmtTokens(u.context)} of ${fmtTokens(u.window)} tokens` }, 'Context ', bar, ` ${pct}%`));
     }
-    if (h.status && p.ptyId) {
+    if (h.status && p.ptyId && !p.status) {
       const working = Date.now() - p.lastWork < 2000;
-      items.push(item(`ph-status${working ? ' working' : ''}`, working ? 'Working…' : 'Waiting for you'));
+      const waiting = p.lastNotice && !p.lastNotice.read && p.lastNotice.level === 'attention';
+      items.push(item(`ph-status${working ? ' working' : waiting ? ' attention' : ''}`, working ? 'Working…' : waiting ? p.lastNotice.title : 'Waiting for you',
+        waiting ? p.lastNotice.message : ''));
     }
     if (h.cost && u) items.push(item('ph-cost', `$${u.cost.toFixed(2)}`, 'Estimated from token usage at API prices'));
   }
+  if (h.status && p.status) items.splice(p.isAgent ? 1 : 0, 0, statusItem(p.status));
   if (h.git && git?.repo) items.push(item('ph-repo', git.repo, 'Repository'));
   if (h.git && git?.branch) items.push(item('ph-branch', git.branch, 'Branch'));
   if (h.directory && p.cwd) items.push(item('ph-dir', basename(p.cwd), p.cwd));
@@ -1395,10 +1767,15 @@ function tabMetas(tab) {
     })];
   }
   const line = m.model && panesLine(tab);
+  // Why the tab wants you (its latest unread notification), and what a pane reported with atx status.
+  const n = latestUnread(tab);
+  const busy = tabPanes(tab).find(p => p.status);
   return [
     m.directory && el('div', { className: 'meta dir', textContent: shortPath(tab.cwd) }),
     m.git && tab.info.git?.branch && gitLine(tab.info.git),
     line && el('div', { className: 'meta model', textContent: line }),
+    busy && el('div', { className: 'meta status', textContent: `⟳ ${statusText(busy.status)}` }),
+    n && el('div', { className: `meta notice ${n.level}`, textContent: n.message ? `${n.title}: ${n.message}` : n.title, title: n.message }),
   ];
 }
 
@@ -1518,8 +1895,10 @@ function tipContent(tab) {
   const g = tab.info.git;
   const gitText = g?.branch && [`Git: ${g.branch}`, g.ahead && `↑${g.ahead}`, g.behind && `↓${g.behind}`, g.changes ? `${g.changes} changed` : 'clean'].filter(Boolean).join('  ');
   const all = tabPanes(tab);
+  const n = latestUnread(tab);
   return [
     head,
+    n && el('div', { className: `tip-notice ${n.level}` }, el('strong', { textContent: n.title }), n.message && el('span', { textContent: n.message })),
     el('div', { className: 'tip-sub', textContent: tab.cwd }),
     gitText && el('div', { className: 'tip-sub', textContent: gitText }),
     el('div', { className: 'tip-label', textContent: `${all.length} pane${all.length === 1 ? '' : 's'}` }),
@@ -1528,7 +1907,7 @@ function tipContent(tab) {
       const model = p === primaryAgent(tab) && tab.info.modelLabel;
       // Agents put their current task in the terminal title (Claude Code does); shells, their folder.
       // (A title that's just the launching shell's path, e.g. cmd.exe, says nothing.)
-      const detail = p.isAgent ? !/\.exe$/i.test(p.title || '') && p.title : p.cwd !== tab.cwd && shortPath(p.cwd);
+      const detail = p.status ? statusText(p.status) : p.isAgent ? !/\.exe$/i.test(p.title || '') && p.title : p.cwd !== tab.cwd && shortPath(p.cwd);
       return el('div', { className: 'tip-row' + (p === tab.focused ? ' focused' : '') },
         p.isAgent ? el('span', { className: 'tip-icon' }, iconEl(paneLook(p), pc))
           : el('span', { className: `tip-icon ${pc}`, textContent: PANE_ICONS[p.kind], ariaHidden: 'true' }),
@@ -1582,6 +1961,7 @@ window.addEventListener('dragstart', hideTip, true);
 // (at least a few seconds of output) ends on a tab you're not looking at, mark it done (green).
 let lastWorking = '';
 setInterval(() => {
+  checkWaiters();
   for (const t of tabs) {
     if (!t.busySince || isWorking(t)) continue;
     if (t !== active && t.lastAgentOutput - t.busySince > 3000) t.done = true;
@@ -1809,7 +2189,7 @@ $('#palette').onclick = e => { if (e.target.id === 'palette') closePalette(); };
 
 function closeOverlays() {
   if (!$('#menu').hidden) { $('#menu').hidden = true; return true; }
-  return closeNewSandbox() || closePalette() || closeSettings() || closeFind();
+  return closeNewSandbox() || closeNotices() || closePalette() || closeSettings() || closeFind();
 }
 
 // ---------------------------------------------------------------- form helpers
@@ -2138,6 +2518,21 @@ const SECTIONS = {
         el('td', {}, iconButton(a)),
         el('td', { textContent: a.name }),
         el('td', {}, Object.assign(input(a.command, v => v.trim() && set('agents', [{ id: a.id, command: v.trim() }])), { className: 'command' }))))),
+  ],
+  'Notifications & control': () => [
+    el('p', { className: 'note' }, 'Agents you start here report when they need you and when they finish, with their own words: the bell in the bottom bar (Ctrl+Shift+B) lists it all, and Ctrl+Shift+U jumps to the latest. Every pane also has the ',
+      el('code', { textContent: 'atx' }), ' command for scripts and agents: run ', el('code', { textContent: 'atx help' }), ' in any terminal here.'),
+    el('h3', { textContent: 'Notifications' }),
+    field('Windows notifications', toggle(S.notifications.desktop, v => set('notifications', { desktop: v })), 'When the window isn\'t focused. Click one to go to its pane.'),
+    field('Flash the taskbar button', toggle(S.notifications.flash, v => set('notifications', { flash: v })), 'Until you switch back to Agent Terminal.'),
+    field('Unread count on the taskbar icon', toggle(S.notifications.badge, v => set('notifications', { badge: v }))),
+    el('h3', { textContent: 'Agents' }),
+    field('Connect agents to notifications', toggle(S.agentHooks, v => set('agentHooks', v)),
+      'Claude Code and Codex started here call atx from their hooks, so you see exactly why they need you ("needs your permission to use Bash") and what they finished. Your own agent settings aren\'t changed. Applies to agents started after you change it.'),
+    field('Give agents Agent Terminal tools', toggle(S.agentTools, v => set('agentTools', v)),
+      'Adds an MCP server to Claude Code, Codex and Copilot CLI started here, with tools to open tabs, start other agents with a prompt, wait for them and read their answers. Applies to agents started after you change it.'),
+    field('Let atx and agents type into and close panes', toggle(S.allowPaneInput, v => set('allowPaneInput', v)),
+      'Enables atx send and atx close (and those tools). Anything running in a pane could then type into another pane, including answering another agent\'s permission prompt. Leave off unless you use it.'),
   ],
   Commands: () => {
     const save = list => set('commands', list);

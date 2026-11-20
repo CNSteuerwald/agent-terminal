@@ -11,11 +11,13 @@ const IS_WIN = process.platform === 'win32';
 // resumeArgs: appended to the command when a tab is restored after restarting the app,
 // so the agent picks up its most recent conversation in that folder.
 // icon / iconColor: the agent's look in tabs and menus (renderer/icons.js); changeable in Settings → Agents.
+// promptArg: how to start the agent on a first message (atx open --prompt): '' passes it as the last argument,
+// '-i' etc. as that option's value. Agents without one can't be given a starting prompt.
 const DEFAULT_AGENTS = [
-  { id: 'claude', name: 'Claude Code', command: 'claude', resumeArgs: '--continue', icon: 'spark', iconColor: '#D97757' },
+  { id: 'claude', name: 'Claude Code', command: 'claude', resumeArgs: '--continue', promptArg: '', icon: 'spark', iconColor: '#D97757' },
   { id: 'copilot', name: 'GitHub Copilot CLI', command: 'copilot', resumeArgs: '--continue', icon: 'robot', iconColor: '#8B5CF6' },
-  { id: 'codex', name: 'OpenAI Codex', command: 'codex', icon: 'cube', iconColor: '#10A37F' },
-  { id: 'gemini', name: 'Gemini CLI', command: 'gemini', icon: 'orbit', iconColor: '#4C8DF6' },
+  { id: 'codex', name: 'OpenAI Codex', command: 'codex', promptArg: '', icon: 'cube', iconColor: '#10A37F' },
+  { id: 'gemini', name: 'Gemini CLI', command: 'gemini', promptArg: '-i', icon: 'orbit', iconColor: '#4C8DF6' },
   { id: 'opencode', name: 'OpenCode', command: 'opencode', resumeArgs: '--continue', icon: 'terminal', iconColor: '#F5A623' },
 ];
 
@@ -51,6 +53,12 @@ const DEFAULTS = {
   paneAnimations: true,
   // What each pane's header shows. Context and cost: Claude Code only.
   paneHeader: { model: true, context: true, cost: false, status: true, git: true, directory: true },
+  // Notification center: a Windows notification while the window isn't focused, flashing its taskbar
+  // button, and the unread count on its taskbar icon.
+  notifications: { desktop: true, flash: true, badge: true },
+  agentHooks: true,        // agents launched here report through hooks (Claude Code, Codex): why they need you, when they finish
+  agentTools: false,       // give launched agents the Agent Terminal MCP tools (open and coordinate tabs and panes)
+  allowPaneInput: false,   // let atx and agents type into and close panes (atx send / close)
   paneCloseButton: 'always',   // always | hover
   iconAnimations: true,        // agent icons animate while their agent works
   colorScheme: 'Campbell',
@@ -111,6 +119,7 @@ function load(file) {
   const s = { ...DEFAULTS, ...user };
   s.tabMetadata = { ...DEFAULTS.tabMetadata, ...user.tabMetadata };
   s.paneHeader = { ...DEFAULTS.paneHeader, ...user.paneHeader };
+  s.notifications = { ...DEFAULTS.notifications, ...user.notifications };
   s.profiles = mergeBy('name', detectShells(), user.profiles || []).filter(p => !p.hidden);
   s.agents = mergeBy('id', DEFAULT_AGENTS, user.agents || []).filter(a => !a.hidden);
   s.schemes = mergeBy('name', BUILTIN_SCHEMES, user.schemes || []);
@@ -129,7 +138,7 @@ function update(file, patch) {
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) delete user[k];
     else if (k === 'profiles' || k === 'agents') user[k] = mergeBy(k === 'profiles' ? 'name' : 'id', user[k] || [], v);
-    else if (k === 'tabMetadata' || k === 'paneHeader' || k === 'keybindings') {
+    else if (k === 'tabMetadata' || k === 'paneHeader' || k === 'notifications' || k === 'keybindings') {
       user[k] = { ...user[k], ...v };
       for (const [kk, vv] of Object.entries(v)) if (vv === null) delete user[k][kk]; // null = back to default
     }
@@ -193,11 +202,24 @@ function shellLaunch(s, name) {
 
 // Agents run through the platform shell so npm shims (.cmd/.ps1) and PATH lookups behave
 // exactly like typing the command yourself.
-function agentLaunch(s, id, resume) {
+// extra: arguments Agent Terminal adds (hooks, MCP; see control.agentArgs). prompt: a first message (atx open --prompt).
+function agentLaunch(s, id, resume, { extra = '', prompt = '' } = {}) {
   const a = s.agents.find(x => x.id === id);
   if (!a) return null;
+  const cmd = extra ? `${a.command} ${extra}` : a.command;
+  if (prompt) {
+    if (typeof a.promptArg !== 'string') throw new Error(`${a.name || id} can't be started with a prompt. Start it without one, then use atx send.`);
+    // The prompt travels in an environment variable, so the shell never parses it: only the variable's
+    // name is on the command line. cmd can't escape a double quote inside quotes, so those become single quotes.
+    const ref = IS_WIN ? '"%AGENT_TERMINAL_PROMPT%"' : '"$AGENT_TERMINAL_PROMPT"';
+    const value = (IS_WIN ? prompt.replace(/"/g, "'") : prompt).replace(/\r?\n/g, ' ');
+    // Right after the agent's own command: options we add, like Claude's --mcp-config <configs...>, take
+    // several values and would swallow a prompt that came after them.
+    const withPrompt = [a.command, a.promptArg, ref, extra].filter(Boolean).join(' ');
+    return { ...inShell(withPrompt), env: { AGENT_TERMINAL_PROMPT: value } };
+  }
   // "|| plain command": resuming fails when the folder has no previous conversation; start fresh then.
-  return inShell(resume && a.resumeArgs ? `${a.command} ${a.resumeArgs} || ${a.command}` : a.command);
+  return inShell(resume && a.resumeArgs ? `${cmd} ${a.resumeArgs} || ${cmd}` : cmd);
 }
 
 // Command tabs run the same way as agents.

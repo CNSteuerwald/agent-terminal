@@ -1,11 +1,13 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu, Notification, nativeImage } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const pty = require('node-pty');
 const settings = require('./settings');
 const sandbox = require('./sandbox');
+const control = require('./control');
+const csc = require('./csc');
 const { getInfo, agentUsage } = require('./info');
 const updater = require('./updater');
 
@@ -19,6 +21,8 @@ const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const DEFAULTS_FILE = path.join(app.getPath('userData'), 'defaults.json');
 const SHIM_DIR = path.join(app.getPath('userData'), 'sbx-shim');
 const SESSION_FILE = path.join(app.getPath('userData'), 'session.json');
+const BIN_DIR = path.join(app.getPath('userData'), 'bin');         // atx.exe, on PATH in every pane
+const CONTROL_DIR = path.join(app.getPath('userData'), 'control'); // hook settings and MCP config for agents
 
 let current = settings.load(SETTINGS_FILE);
 // Open tabs per window, written on every change so they survive closing (or a crash).
@@ -92,8 +96,9 @@ function createWindow(dir, session) {
     if (s) { Object.assign(s, { bounds: win.getNormalBounds(), maximized: win.isMaximized() }); writeSessions(); }
   });
   const wc = win.webContents;
-  const killOwned = () => { for (const [id, p] of ptys) if (p.wc === wc) { p.proc.kill(); ptys.delete(id); } };
+  const killOwned = () => { for (const [id, p] of ptys) if (p.wc === wc) { p.proc.kill(); ptys.delete(id); } failWindowRequests(wc); };
   wc.on('destroyed', killOwned);
+  win.on('focus', () => win.flashFrame(false));
   // A reload (e.g. from DevTools) starts a fresh page that no longer knows the old processes.
   wc.on('did-start-navigation', ({ isMainFrame, isSameDocument }) => { if (isMainFrame && !isSameDocument) killOwned(); });
 }
@@ -168,9 +173,15 @@ fs.watchFile(SETTINGS_FILE, { interval: 1000 }, () => {
 
 // kind: 'shell' (name = profile), 'agent' (name = agent id), 'command' (name = command tab), 'sbx' (the sbx TUI),
 // 'sandbox' (args = sbx arguments, e.g. ['run', '--name', 'my-sandbox']).
-async function launchSpec({ kind, name, args, resume }) {
+async function launchSpec({ kind, name, args, resume, prompt }) {
   if (kind === 'shell') return settings.shellLaunch(current.settings, name);
-  if (kind === 'agent') return settings.agentLaunch(current.settings, name, !!resume);
+  if (kind === 'agent') {
+    const a = current.settings.agents.find(x => x.id === name);
+    return settings.agentLaunch(current.settings, name, !!resume, {
+      extra: a ? await agentExtra(a.command) : '',
+      prompt: typeof prompt === 'string' ? prompt.slice(0, 20000) : '',
+    });
+  }
   if (kind === 'command') return settings.commandLaunch(current.settings, name);
   if (kind !== 'sbx' && kind !== 'sandbox') return null;
   const file = await sbxPath();
@@ -180,6 +191,87 @@ async function launchSpec({ kind, name, args, resume }) {
   return { file, args };
 }
 
+// ---------------------------------------------------------------- atx (see control.js)
+// Built once per launch; panes started before it's ready wait for it.
+const atxReady = app.whenReady().then(async () => {
+  const exe = await csc.build('atx', BIN_DIR).catch(() => null);
+  let files = null;
+  try { files = exe && control.writeAgentFiles(CONTROL_DIR, exe); } catch { /* agents just run without the integration */ }
+  return { exe, files };
+});
+
+// The user's own Codex notify setting wins over ours (Codex only takes one).
+function codexHasNotify() {
+  const file = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml');
+  try { return /^\s*notify\s*=/m.test(fs.readFileSync(file, 'utf8')); } catch { return false; }
+}
+
+async function agentExtra(command) {
+  const s = current.settings;
+  if (!s.agentHooks && !s.agentTools) return '';
+  const { exe, files } = await atxReady;
+  return control.agentArgs(command, { atxExe: exe, files, hooks: s.agentHooks, tools: s.agentTools, codexHasNotify: codexHasNotify() });
+}
+
+// Runs an atx command in the window that owns the pane it's about (or that atx ran in).
+const ctlWaiting = new Map(); // request id -> { resolve, reject, timer, wc }
+let ctlSeq = 0;
+function execInWindow(c) {
+  const target = c.target ?? c.caller;
+  let wc = target != null ? ptys.get(target)?.wc : null;
+  if (!wc && c.cmd === 'open') wc = (BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0])?.webContents;
+  if (!wc || wc.isDestroyed()) {
+    return Promise.reject(new Error(target != null ? `No pane ${target}. Run "atx list" to see pane ids.` : 'No Agent Terminal window is open.'));
+  }
+  const id = ++ctlSeq;
+  const ms = c.cmd === 'wait' ? c.timeout * 1000 + 15000 : 60000;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { ctlWaiting.delete(id); reject(new Error('Agent Terminal did not answer in time.')); }, ms);
+    ctlWaiting.set(id, { resolve, reject, timer, wc });
+    wc.send('ctl:run', id, c);
+  });
+}
+ipcMain.on('ctl:reply', (e, id, reply) => {
+  const w = ctlWaiting.get(id);
+  if (!w || w.wc !== e.sender) return;
+  ctlWaiting.delete(id);
+  clearTimeout(w.timer);
+  if (reply?.ok) w.resolve(reply.result ?? {});
+  else w.reject(new Error(String(reply?.error || 'Failed.')));
+});
+const failWindowRequests = wc => {
+  for (const [id, w] of ctlWaiting) if (w.wc === wc) { clearTimeout(w.timer); ctlWaiting.delete(id); w.reject(new Error('The window closed.')); }
+};
+
+// ---------------------------------------------------------------- notifications (Windows integration)
+const shownNotifications = new Set(); // keeps them from being garbage-collected before they're clicked
+ipcMain.on('notify:show', (e, { title, body, pane }) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || !Notification.isSupported()) return;
+  const n = new Notification({ title: String(title).slice(0, 120), body: String(body).slice(0, 300) });
+  shownNotifications.add(n);
+  const forget = () => shownNotifications.delete(n);
+  n.on('click', () => {
+    forget();
+    if (win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    e.sender.send('notify:open', pane);
+  });
+  n.on('close', forget);
+  n.show();
+});
+ipcMain.on('notify:flash', e => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win && !win.isFocused()) win.flashFrame(true);
+});
+ipcMain.on('notify:badge', (e, dataUrl, label) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || process.platform !== 'win32') return;
+  win.setOverlayIcon(typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png') ? nativeImage.createFromDataURL(dataUrl) : null, String(label || ''));
+});
+
 ipcMain.handle('pty:spawn', async (e, req) => {
   const { kind, name, cwd, cols, rows } = req;
   const spec = await launchSpec(req);
@@ -188,7 +280,9 @@ ipcMain.handle('pty:spawn', async (e, req) => {
   const base = { ...process.env };
   const fresh = await settings.freshPath();
   if (fresh) base[Object.keys(base).find(k => k.toUpperCase() === 'PATH') || 'Path'] = fresh;
-  let env = { ...base, COLORTERM: 'truecolor', TERM_PROGRAM: 'agent-terminal', ...spec.env };
+  const id = nextPtyId++;
+  const { exe } = await atxReady;
+  let env = control.paneEnv({ ...base, COLORTERM: 'truecolor', TERM_PROGRAM: 'agent-terminal', ...spec.env }, id, exe && path.dirname(exe));
   if (kind === 'sbx') {
     env = sandbox.shimEnv(env, await sandbox.ensureShim(SHIM_DIR));
     sbxOwner = e.sender;
@@ -197,7 +291,6 @@ ipcMain.handle('pty:spawn', async (e, req) => {
     name: 'xterm-256color', cols, rows, cwd: dir, env,
     useConptyDll: process.platform === 'win32', // bundled ConPTY: same rendering fixes as Windows Terminal
   });
-  const id = nextPtyId++;
   const wc = e.sender;
   ptys.set(id, { proc, wc });
   proc.onData(d => { if (!wc.isDestroyed()) wc.send('pty:data', id, d); });
@@ -241,8 +334,12 @@ ipcMain.on('window:toggle', (e, what) => {
   if (what === 'devtools') w.webContents.toggleDevTools();
 });
 
+// Windows groups notifications (and their clicks) by app id: the installer's, or this Electron in development.
+if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'com.cnsteuerwald.agentterminal' : process.execPath);
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null); // keys like Ctrl+Shift+I belong to the terminal, not the default menu
+  control.listen(req => control.run(req, { exec: execInWindow, allowInput: current.settings.allowPaneInput, version: app.getVersion() }));
   sandbox.listen(launch => {
     const wc = sbxOwner && !sbxOwner.isDestroyed() ? sbxOwner : BrowserWindow.getAllWindows()[0]?.webContents;
     wc?.send('sbx:open', launch);

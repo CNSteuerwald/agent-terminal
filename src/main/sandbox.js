@@ -6,9 +6,8 @@
 // over a named pipe and we open the session as a tab instead.
 const { execFile } = require('child_process');
 const crypto = require('crypto');
-const fs = require('fs');
 const net = require('net');
-const path = require('path');
+const csc = require('./csc');
 const SandboxArgs = require('../shared/sandbox-args');
 
 const IS_WIN = process.platform === 'win32';
@@ -31,18 +30,8 @@ function parseWtLaunch(args) {
 }
 
 // Compiles the wt.exe stand-in into dir. Resolves to the directory, or null when unavailable.
-function ensureShim(dir) {
-  if (!IS_WIN) return Promise.resolve(null);
-  // csc.exe can't read inside app.asar; packaged builds ship src/shim unpacked (build.asarUnpack in package.json).
-  const src = path.join(__dirname, '..', 'shim', 'wt.cs').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-  const exe = path.join(dir, 'wt.exe');
-  try {
-    if (fs.statSync(exe).mtimeMs >= fs.statSync(src).mtimeMs) return Promise.resolve(dir);
-  } catch { /* not built yet */ }
-  const csc = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
-  fs.mkdirSync(dir, { recursive: true });
-  return new Promise(resolve => execFile(csc, ['-nologo', `-out:${exe}`, src], { windowsHide: true, timeout: 60000 },
-    err => resolve(err ? null : dir)));
+async function ensureShim(dir) {
+  return (await csc.build('wt', dir)) && dir;
 }
 
 // Listens for wt.exe stand-in requests; onLaunch({ args, name, cwd }) for each valid one. Returns the server.
