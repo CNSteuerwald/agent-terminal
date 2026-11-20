@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld('api', {
   sbxList: () => ipcRenderer.invoke('sbx:list'),
   sbxCreate: opts => ipcRenderer.invoke('sbx:create', opts),
   onSbxOpen: cb => ipcRenderer.on('sbx:open', (_e, launch) => cb(launch)),
+  // atx commands for this window (see main/control.js), and the notification center's Windows integration.
+  onControl: cb => ipcRenderer.on('ctl:run', (_e, id, c) => cb(id, c)),
+  controlReply: (id, reply) => ipcRenderer.send('ctl:reply', id, reply),
+  showNotification: n => ipcRenderer.send('notify:show', n),
+  flashFrame: () => ipcRenderer.send('notify:flash'),
+  setBadge: (dataUrl, label) => ipcRenderer.send('notify:badge', dataUrl, label),
+  onNotificationClick: cb => ipcRenderer.on('notify:open', (_e, pane) => cb(pane)),
   detectSetup: () => ipcRenderer.invoke('setup:detect'),
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),

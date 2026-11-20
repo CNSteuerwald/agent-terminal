@@ -59,7 +59,6 @@
         "provider": "github",
         "owner": "CNSteuerwald",
         "repo": "agent-terminal",
-        "private": true,
         "releaseType": "draft"
       }
     ]

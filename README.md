@@ -13,15 +13,12 @@ Inspired by [microsoft/intelligent-terminal](https://github.com/microsoft/intell
 
 ## Install (for the team)
 
-1. Make sure you can see [CNSteuerwald/agent-terminal](https://github.com/CNSteuerwald/agent-terminal) (it's private; ask to be added as a collaborator).
-2. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. That's the only file you need. The release's other two files are for auto-update. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
-3. Windows may show **"Windows protected your PC"** because the installer isn't code-signed yet. Click **More info → Run anyway**.
+1. Download `Agent-Terminal-Setup-<version>.exe` from the [latest release](https://github.com/CNSteuerwald/agent-terminal/releases/latest) and run it. That's the only file you need. The release's other two files are for auto-update. It installs for your user only, so no admin rights are needed, and adds a Start menu shortcut.
+2. Windows may show **"Windows protected your PC"** because the installer isn't code-signed yet. Click **More info → Run anyway**.
 
 ### Updating
 
 The app checks for new releases on launch and every 15 minutes, and downloads them in the background. There are no pop-ups: the right end of the bottom bar shows `↓ Downloading update…`, then `✓ Update x.y.z ready · installs when you quit · Restart now`. Either keep working, and the update installs silently when you quit so the next launch is up to date, or click **Restart now** to install it immediately. Your tabs reopen either way.
-
-While the repo is private, update checks use your GitHub CLI login. Run `gh auth login` once with the account that can see the repo. Without it, updates are manual: download and run the newest installer from Releases, and your settings and tabs are kept.
 
 ### Uninstalling
 
@@ -64,8 +61,6 @@ git push --follow-tags
 Pushing the tag runs the same workflow, which fails if the tag doesn't match `package.json`'s version.
 
 To build an installer locally without publishing, run `npm run dist`. It writes the same three files to `dist\`. Only the `.exe` matters for a local install.
-
-> **Going public later:** make the repo public, remove `"private": true` from `build.publish` in `package.json`, and delete the `gh auth token` shortcut in `src/main/updater.js`. Updates then work for everyone with no GitHub login.
 
 ---
 
@@ -181,6 +176,34 @@ Turn this on in the setup wizard or **Settings → Sandboxes**. It needs [Docker
 
 **How it works (Windows):** when the sbx dashboard sees `WT_SESSION`, it opens sandboxes with `wt.exe -w new nt -- sbx … run --name <sandbox>`. Inside the sbx tab only, Agent Terminal puts its own small `wt.exe` first on `PATH` ([`src/shim/wt.cs`](src/shim/wt.cs)). That `wt.exe` sends the request to the app over a local named pipe, protected by a per-launch random token, and the app opens the tab. It only ever runs `sbx` with the arguments sbx asked for. The `wt.exe` is compiled on first use with the C# compiler built into Windows (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) and cached in the app's data folder. On macOS/Linux the sbx tab works, but sandboxes still open in sbx's own choice of external terminal.
 
+### Notifications and the `atx` command
+
+**The notification center.** Agents tell you exactly why they need you and what they finished, not just that their output stopped:
+
+- **Agents started here report through their own hooks.** Claude Code gets `--settings` with `Notification`, `Stop` and `UserPromptSubmit` hooks; Codex gets a `notify` program (unless your `~/.codex/config.toml` already sets one). So "Claude needs your permission to use Bash" or the agent's final answer show up as they are. Your own agent settings files are never changed. Switch it off in **Settings → Notifications & control**.
+- **Terminal notification escape codes** work too, from any program: OSC 9 (iTerm2), OSC 777 `notify` (Ghostty, foot, urxvt) and OSC 99 (kitty). OSC 9;4 progress shows as a progress bar on the pane.
+- **Where they show:** the bell in the bottom bar (**Ctrl+Shift+B**) lists them, newest first; click one to go to its pane, or press **Ctrl+Shift+U** for the latest unread. The tab shows the latest one under its name (amber: needs you, green: finished) and in its tooltip, the pane header shows it, and focusing the pane marks it read. While the window isn't focused you also get a Windows notification (click it to go to the pane), a flashing taskbar button and an unread count on the taskbar icon; each can be switched off.
+
+**`atx`**, on `PATH` in every pane, lets scripts, you and agents drive Agent Terminal (`atx help` for everything):
+
+| Command | What it does |
+|---|---|
+| `atx notify [--level info\|attention\|done] [--title T] MESSAGE` | Notification for this pane, e.g. at the end of a long build |
+| `atx status [--progress 0-100] TEXT` / `--clear` | Live status in the pane header and the sidebar |
+| `atx list [--json]` | Tabs and panes with their ids |
+| `atx open [--cwd DIR] [--agent ID] [--prompt TEXT] [--background]` | New tab group, e.g. another agent started on a task; prints its pane id |
+| `atx split [--down] [--agent ID] [--prompt TEXT]` | New pane next to this one |
+| `atx wait PANE [--timeout S]` | Waits until that agent finishes its turn, needs you or exits, and prints its answer (exit code 3 on timeout) |
+| `atx read PANE [--lines N]` | The last lines of a pane's screen |
+| `atx focus PANE` | Switch to a pane |
+| `atx send PANE TEXT` / `atx close PANE` | Type into or close a pane: off unless **Let atx and agents type into and close panes** is on |
+
+For example, from one agent's terminal: `$p = atx open --agent claude --prompt "Fix the flaky test in auth.spec.ts" --background; atx wait $p`.
+
+**Agent tools (MCP).** With **Give agents Agent Terminal tools** on, Claude Code, Codex and Copilot CLI started here also get these commands as MCP tools (`notify`, `set_status`, `list_panes`, `open_tab`, `split_pane`, `wait_for_pane`, `read_pane`, `focus_pane`, and, when allowed, `send_to_pane` and `close_pane`), so an agent can start helpers on subtasks and collect their results.
+
+**How it works:** every pane's environment has `AGENT_TERMINAL_PANE` (its id) and a pipe name and per-launch random token. `atx.exe` ([`src/shim/atx.cs`](src/shim/atx.cs)) only relays its arguments over that local named pipe; parsing and behavior live in [`src/main/control.js`](src/main/control.js). Like `wt.exe`, it's compiled on first use with the C# compiler built into Windows. Hooks never print, always exit 0 and give up within seconds, so they can't hold up or change what an agent does. Agent prompts from `--prompt` reach the agent through an environment variable, never through the shell's parser. Sandbox sessions run their agent inside a container, so they don't report through hooks.
+
 ### Copy and paste
 
 - **Select** by dragging, in both the shell and the agent pane. Claude Code and other full-screen CLIs capture the mouse, and in those panes a drag still selects text while a plain click goes to the app, so Claude's clickable buttons keep working. To send drags to the app instead, turn off **Settings → General → Drag selects text in apps that use the mouse**. Then hold Shift to select.
@@ -211,6 +234,8 @@ All of these can be rebound in **Settings → Actions** (click the field and pre
 | `Ctrl+Shift+O` | Open folder in new tab |
 | `Ctrl+Shift+D` | Duplicate tab (same panes and layout) |
 | `Ctrl+Shift+W` | Close focused pane (the tab closes with its last pane) |
+| `Ctrl+Shift+B` | Notifications |
+| `Ctrl+Shift+U` | Go to the latest unread notification |
 | `Ctrl+Shift+E` | New terminal pane |
 | `Alt+Shift+=` / `Alt+Shift+-` | Split right / down with a new terminal |
 | `Alt+Arrows` | Focus the pane to the left / right / above / below |
@@ -258,6 +283,10 @@ The file only holds what you changed. Run *Open default settings* (`Ctrl+Alt+,`)
   "sandboxEnabled": false,                 // Docker Sandboxes: pinned "sbx" tab
   "sandboxCommand": "sbx",                 // name or full path of sbx
   "sandboxKits": [],                       // kits offered in New sandbox (remembered as you use them)
+  "notifications": { "desktop": true, "flash": true, "badge": true }, // Windows notification, taskbar flash, taskbar count
+  "agentHooks": true,                      // agents started here report through hooks (Claude Code, Codex)
+  "agentTools": false,                     // give them the Agent Terminal MCP tools
+  "allowPaneInput": false,                 // allow atx send / close (and those tools)
   "defaultProfile": "PowerShell",          // shell for new tabs (a profile name)
   "defaultAgent": "claude",                // agent id for new tabs, "" for none
   "startingDirectory": "~",
@@ -332,8 +361,11 @@ src/
   main/info.js       Git status and agent-model detection for the sidebar
   main/updater.js    Auto-update from GitHub Releases (electron-updater)
   main/sandbox.js    Docker Sandboxes: sbx lookup, sbx create, wt.exe stand-in build, named-pipe listener
+  main/control.js    atx: command parsing, agent hooks, MCP server, the control pipe, agent launch arguments
+  main/csc.js        Builds the C# helpers in shim/ with the compiler that ships with Windows
   shared/sandbox-args.js  New-sandbox validation and `sbx create` arguments (used by the UI and main)
   shim/wt.cs         The wt.exe stand-in used inside the sbx tab (Windows)
+  shim/atx.cs        atx.exe: relays its arguments to the app over a named pipe (Windows)
   preload.js         The small, explicit API the UI may call (context-isolated, sandboxed)
   renderer/          UI: index.html, styles.css, app.js (tabs, panes, drag and drop, actions, settings, palette), keys.js
   renderer/layout.js Pane layout tree (splits and groups): pure and unit-tested
@@ -349,6 +381,7 @@ The UI is plain JavaScript with [xterm.js](https://xtermjs.org/), with no framew
 - **`'claude' is not recognized`** in the agent pane: the CLI isn't on the `PATH` the app was started with. Check `claude --version` in a new terminal, then restart Agent Terminal.
 - **Started from inside another Claude Code session:** child processes inherit that session's environment variables, and Claude Code may warn about it. Start Agent Terminal from a regular terminal, Explorer or a shortcut.
 - **Sandboxes from the sbx tab open in Windows Terminal instead of here:** the `wt.exe` stand-in couldn't be built (no `csc.exe`). Check that `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe` exists. Until then, choose **In this terminal** in the sbx dialog.
+- **`atx` is not recognized, or agents don't report notifications:** `atx.exe` couldn't be built (no `csc.exe`, see above), or the pane was started before it was. Open a new pane. Agents pick up **Settings → Notifications & control** changes when they start.
 - **Settings file has a syntax error:** a message appears at the bottom of the window and the app keeps the defaults until the file parses again.
 
 ## Not included (yet)

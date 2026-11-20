@@ -480,3 +480,51 @@ body[data-icon-anim="off"] .agent-icon *, body[data-icon-anim="off"] .agent-icon
 @media (prefers-reduced-motion: reduce) { .sbx-job-bar::after { animation: none; background-size: 100% 100%; opacity: .5; } .sbx-job { animation: none; } }
 /* Settings → Agents: switched-off agents are dimmed (their switch stays bright). */
 tr.agent-off td:not(:first-child) { opacity: .45; }
+
+/* ---------- notification center ---------- */
+#notif-btn { position: relative; display: grid; place-items: center; width: 32px; height: 26px; padding: 0; color: var(--muted); }
+#notif-btn:hover, #notif-btn.has-unread { color: var(--fg); }
+/* Bell (Octicons, MIT), tinted with the text color. */
+#notif-btn .bell { width: 17px; height: 17px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947Zm5-3.5A3.5 3.5 0 0 0 4.5 5v2.947c0 .346-.102.683-.294.97l-1.703 2.556a.017.017 0 0 0-.003.01l.001.006c0 .002.002.004.004.006l.006.004.007.001h10.964l.007-.001.006-.004.004-.006.001-.007a.017.017 0 0 0-.003-.01l-1.703-2.554a1.745 1.745 0 0 1-.294-.97V5A3.5 3.5 0 0 0 8 1.5Z'/%3E%3C/svg%3E") center / contain no-repeat; }
+#notif-count { position: absolute; top: 0; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: #3fb950; color: #111; font: 700 10px/15px "Segoe UI", sans-serif; box-sizing: border-box; }
+#notif-count:empty { display: none; }
+#notif-btn.attention #notif-count { background: #f5a623; animation: ai-ping 1.2s ease-out 3; }
+#notif-panel { right: 8px; bottom: 40px; width: min(420px, calc(100vw - 16px)); max-height: min(560px, 70vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+#notif-panel[hidden] { display: none; }
+.notif-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--border); }
+.notif-head .spacer { flex: 1; }
+.notif-head button { width: auto; font-size: 12px; color: var(--muted); }
+.notif-head button:hover:not(:disabled) { color: var(--fg); }
+.notif-list { list-style: none; margin: 0; padding: 4px; overflow: auto; }
+#notif-panel .notif-item { display: flex; gap: 10px; align-items: flex-start; width: 100%; padding: 8px 10px; border-radius: 6px; text-align: left; position: relative; }
+.notif-item.unread::before { content: ""; position: absolute; left: 2px; top: 14px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.notif-item.unread.attention::before { background: #f5a623; }
+.notif-item.unread.done::before { background: #3fb950; }
+.notif-item.gone { opacity: .55; }
+.notif-icon { flex: 0 0 auto; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; }
+.notif-icon .agent-icon { --ai-size: 20px; }
+.notif-glyph { font: 13px ui-monospace, Consolas, monospace; color: var(--muted); }
+.notif-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.notif-line { display: flex; gap: 8px; align-items: baseline; }
+.notif-line strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-item.attention .notif-line strong { color: #f5a623; }
+.notif-item.done .notif-line strong { color: #3fb950; }
+.notif-line small, .notif-where { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notif-msg { color: var(--fg); font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.notif-item:not(.unread) .notif-msg { color: var(--muted); }
+.notif-empty { margin: 0; padding: 24px 20px; color: var(--muted); text-align: center; line-height: 1.5; }
+code { font: 12px ui-monospace, Consolas, monospace; padding: 1px 4px; border-radius: 3px; background: var(--hover); }
+
+/* Sidebar and tooltip: why a tab wants you, and pane statuses from atx. */
+.meta.notice { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta.notice.attention { color: #f5a623; }
+.meta.notice.done { color: #3fb950; }
+.meta.status { color: var(--accent); }
+.tip-notice { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 4px; padding: 6px 8px; border-radius: 6px; background: var(--hover); border-left: 3px solid var(--accent); }
+.tip-notice.attention { border-left-color: #f5a623; }
+.tip-notice.done { border-left-color: #3fb950; }
+.tip-notice span { color: var(--muted); overflow-wrap: anywhere; }
+.ph-status.attention { color: #f5a623; }
+.ph-ctl { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); }
+#settings-body h3 { margin: 18px 0 2px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
