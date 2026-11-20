@@ -116,6 +116,10 @@ function load(file) {
   s.schemes = mergeBy('name', BUILTIN_SCHEMES, user.schemes || []);
   s.commands = (Array.isArray(user.commands) ? user.commands : []).filter(c => c?.name && c?.command);
   if (!s.profiles.some(p => p.name === s.defaultProfile)) s.defaultProfile = s.profiles[0]?.name || '';
+  // A switched-off default agent (enabled: false) gives way to the first one still on; '' (shell only) stays.
+  if (s.defaultAgent && !s.agents.some(a => a.id === s.defaultAgent && a.enabled !== false)) {
+    s.defaultAgent = s.agents.find(a => a.enabled !== false)?.id || '';
+  }
   return { settings: s, error };
 }
 
